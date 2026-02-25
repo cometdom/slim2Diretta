@@ -321,6 +321,7 @@ link_directories(
 
 set(SLIM2DIRETTA_SOURCES
     src/main.cpp
+    src/SlimprotoClient.cpp
     diretta/DirettaSync.cpp
     diretta/globals.cpp
 )

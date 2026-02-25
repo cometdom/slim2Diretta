@@ -7,6 +7,7 @@
  */
 
 #include "Config.h"
+#include "SlimprotoClient.h"
 #include "DirettaSync.h"
 #include "LogLevel.h"
 
@@ -59,10 +60,15 @@ void shutdownAsyncLogging() {
 // ============================================
 
 std::atomic<bool> g_running{true};
+SlimprotoClient* g_slimproto = nullptr;  // For signal handler access
 
 void signalHandler(int signal) {
     std::cout << "\nSignal " << signal << " received, shutting down..." << std::endl;
     g_running.store(false, std::memory_order_release);
+    // Stop the slimproto client to unblock its receive loop
+    if (g_slimproto) {
+        g_slimproto->stop();
+    }
 }
 
 void statsSignalHandler(int /*signal*/) {
@@ -261,19 +267,67 @@ int main(int argc, char* argv[]) {
     }
     std::cout << std::endl;
 
-    // TODO: Phase 5 - Create and start PlayerController
-    // For now, just validate that we can talk to DirettaSync
-    LOG_INFO("Phase 1 scaffold - PlayerController not yet implemented");
-    LOG_INFO("Use --list-targets to verify Diretta SDK connectivity");
+    // Create Slimproto client and connect to LMS
+    auto slimproto = std::make_unique<SlimprotoClient>();
+    g_slimproto = slimproto.get();
 
-    // Wait loop (placeholder for PlayerController)
-    std::cout << "Waiting for implementation... (Press Ctrl+C to stop)" << std::endl;
-    while (g_running.load(std::memory_order_acquire)) {
+    // Register stream callback (placeholder until PlayerController exists)
+    slimproto->onStream([](const StrmCommand& cmd, const std::string& httpRequest) {
+        switch (cmd.command) {
+            case STRM_START:
+                LOG_INFO("Stream start requested (format=" << cmd.format << ")");
+                // TODO: Phase 5 - PlayerController handles this
+                break;
+            case STRM_STOP:
+                LOG_INFO("Stream stop requested");
+                break;
+            case STRM_PAUSE:
+                LOG_INFO("Pause requested");
+                break;
+            case STRM_UNPAUSE:
+                LOG_INFO("Unpause requested");
+                break;
+            case STRM_FLUSH:
+                LOG_INFO("Flush requested");
+                break;
+            default:
+                break;
+        }
+    });
+
+    slimproto->onVolume([](uint32_t gainL, uint32_t gainR) {
+        LOG_DEBUG("Volume: L=0x" << std::hex << gainL << " R=0x" << gainR
+                  << std::dec << " (ignored - bit-perfect)");
+    });
+
+    if (!slimproto->connect(config.lmsServer, config.lmsPort, config)) {
+        std::cerr << "Failed to connect to LMS" << std::endl;
+        shutdownAsyncLogging();
+        return 1;
+    }
+
+    // Run slimproto receive loop in a dedicated thread
+    std::thread slimprotoThread([&slimproto]() {
+        slimproto->run();
+    });
+
+    std::cout << "Player registered with LMS" << std::endl;
+    std::cout << "(Press Ctrl+C to stop)" << std::endl;
+    std::cout << std::endl;
+
+    // Wait for shutdown signal
+    while (g_running.load(std::memory_order_acquire) && slimproto->isConnected()) {
         std::this_thread::sleep_for(std::chrono::seconds(1));
     }
 
+    // Clean shutdown
     std::cout << "\nShutting down..." << std::endl;
-    shutdownAsyncLogging();
+    g_slimproto = nullptr;
+    slimproto->disconnect();
+    if (slimprotoThread.joinable()) {
+        slimprotoThread.join();
+    }
 
+    shutdownAsyncLogging();
     return 0;
 }
