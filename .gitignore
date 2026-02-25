@@ -1,0 +1,25 @@
+# Build artifacts
+build/
+*.o
+*.a
+
+# Diretta SDK (proprietary, personal use only)
+DirettaHostSDK_*/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.bak
