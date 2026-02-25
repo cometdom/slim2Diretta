@@ -323,6 +323,10 @@ set(SLIM2DIRETTA_SOURCES
     src/main.cpp
     src/SlimprotoClient.cpp
     src/HttpStreamClient.cpp
+    src/Decoder.cpp
+    src/FlacDecoder.cpp
+    src/PcmDecoder.cpp
+    src/DsdProcessor.cpp
     diretta/DirettaSync.cpp
     diretta/globals.cpp
 )

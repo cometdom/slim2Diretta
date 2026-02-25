@@ -9,6 +9,7 @@
 #include "Config.h"
 #include "SlimprotoClient.h"
 #include "HttpStreamClient.h"
+#include "Decoder.h"
 #include "DirettaSync.h"
 #include "LogLevel.h"
 
@@ -277,6 +278,7 @@ int main(int argc, char* argv[]) {
     auto httpStream = std::make_shared<HttpStreamClient>();
     std::thread audioTestThread;
     std::atomic<bool> audioTestRunning{false};
+    std::atomic<bool> audioThreadDone{true};  // true when no thread is running
 
     // Register stream callback
     slimproto->onStream([&](const StrmCommand& cmd, const std::string& httpRequest) {
@@ -288,7 +290,18 @@ int main(int argc, char* argv[]) {
                 audioTestRunning.store(false);
                 httpStream->disconnect();
                 if (audioTestThread.joinable()) {
-                    audioTestThread.join();
+                    // Wait up to 500ms for the thread to finish
+                    auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
+                    while (!audioThreadDone.load(std::memory_order_acquire) &&
+                           std::chrono::steady_clock::now() < deadline) {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                    }
+                    if (audioThreadDone.load(std::memory_order_acquire)) {
+                        audioTestThread.join();
+                    } else {
+                        audioTestThread.detach();
+                        LOG_WARN("Audio thread did not stop in time, detached");
+                    }
                 }
 
                 // Determine server IP (0 = use control connection IP)
@@ -313,67 +326,122 @@ int main(int argc, char* argv[]) {
                 slimproto->sendResp(httpStream->getResponseHeaders());
                 slimproto->sendStat(StatEvent::STMh);  // Headers received
 
-                // Start reading audio data in a test thread
-                audioTestRunning.store(true);
-                audioTestThread = std::thread([&httpStream, &slimproto, &audioTestRunning]() {
-                    uint8_t buf[16384];
-                    bool firstRead = true;
-                    uint64_t totalBytes = 0;
+                // Reset elapsed time for new track
+                slimproto->updateElapsed(0, 0);
+                slimproto->updateStreamBytes(0);
 
+                // Start audio decode thread
+                char formatCode = cmd.format;
+                audioTestRunning.store(true);
+                audioThreadDone.store(false, std::memory_order_release);
+                audioTestThread = std::thread([&httpStream, &slimproto, &audioTestRunning, &audioThreadDone, formatCode]() {
+                    // Create decoder for this format
+                    auto decoder = Decoder::create(formatCode);
+                    if (!decoder) {
+                        LOG_ERROR("[Audio] Unsupported format: " << formatCode);
+                        slimproto->sendStat(StatEvent::STMn);
+                        audioThreadDone.store(true, std::memory_order_release);
+                        return;
+                    }
+
+                    slimproto->sendStat(StatEvent::STMs);  // Stream started
+
+                    uint8_t httpBuf[16384];
+                    // Decode buffer: up to 1024 frames * 2 channels
+                    constexpr size_t MAX_DECODE_FRAMES = 1024;
+                    int32_t decodeBuf[MAX_DECODE_FRAMES * 2];
+                    uint64_t totalBytes = 0;
+                    bool formatLogged = false;
+                    uint64_t lastElapsedLog = 0;
+
+                    // Read HTTP -> feed decoder -> read decoded frames
                     while (audioTestRunning.load(std::memory_order_acquire) &&
                            httpStream->isConnected()) {
-                        ssize_t n = httpStream->read(buf, sizeof(buf));
-                        if (n <= 0) break;
+                        ssize_t n = httpStream->read(httpBuf, sizeof(httpBuf));
+                        if (n <= 0) {
+                            if (n == 0) decoder->setEof();
+                            break;
+                        }
 
                         totalBytes += n;
+                        slimproto->updateStreamBytes(totalBytes);
 
-                        if (firstRead) {
-                            firstRead = false;
-                            slimproto->sendStat(StatEvent::STMs);  // Stream started
+                        // Feed encoded data to decoder
+                        decoder->feed(httpBuf, static_cast<size_t>(n));
 
-                            // Log first 64 bytes as hex dump
-                            std::ostringstream hex;
-                            hex << std::hex << std::setfill('0');
-                            for (int i = 0; i < std::min(static_cast<int>(n), 64); i++) {
-                                if (i > 0 && i % 16 == 0) hex << "\n                    ";
-                                hex << std::setw(2) << static_cast<int>(buf[i]) << " ";
+                        // Pull decoded frames
+                        while (audioTestRunning.load(std::memory_order_relaxed)) {
+                            size_t frames = decoder->readDecoded(decodeBuf, MAX_DECODE_FRAMES);
+                            if (frames == 0) break;
+
+                            // Log format on first successful decode
+                            if (!formatLogged && decoder->isFormatReady()) {
+                                formatLogged = true;
+                                auto fmt = decoder->getFormat();
+                                LOG_INFO("[Audio] Decoding: " << fmt.sampleRate << " Hz, "
+                                         << fmt.bitDepth << "-bit, " << fmt.channels << " ch"
+                                         << (fmt.totalSamples > 0
+                                             ? " (" + std::to_string(fmt.totalSamples * fmt.channels * (fmt.bitDepth/8) / 1048576) + " MB decoded)"
+                                             : ""));
+
+                                // Tell LMS we have enough data to start
+                                slimproto->sendStat(StatEvent::STMl);
                             }
-                            LOG_INFO("[HTTP] First bytes: " << hex.str());
 
-                            // Identify format from magic bytes
-                            if (n >= 4) {
-                                if (buf[0] == 'f' && buf[1] == 'L' && buf[2] == 'a' && buf[3] == 'C') {
-                                    LOG_INFO("[HTTP] FLAC stream detected");
-                                } else if (buf[0] == 'R' && buf[1] == 'I' && buf[2] == 'F' && buf[3] == 'F') {
-                                    LOG_INFO("[HTTP] WAV stream detected");
-                                } else if (buf[0] == 'F' && buf[1] == 'O' && buf[2] == 'R' && buf[3] == 'M') {
-                                    LOG_INFO("[HTTP] AIFF stream detected");
-                                } else {
-                                    LOG_INFO("[HTTP] Unknown format (magic: 0x"
-                                             << std::hex << std::setfill('0')
-                                             << std::setw(2) << (int)buf[0]
-                                             << std::setw(2) << (int)buf[1]
-                                             << std::setw(2) << (int)buf[2]
-                                             << std::setw(2) << (int)buf[3] << std::dec << ")");
+                            // Update elapsed time for LMS progress bar
+                            if (decoder->isFormatReady()) {
+                                auto fmt = decoder->getFormat();
+                                if (fmt.sampleRate > 0) {
+                                    uint64_t decoded = decoder->getDecodedSamples();
+                                    uint32_t elapsedSec = static_cast<uint32_t>(decoded / fmt.sampleRate);
+                                    uint32_t elapsedMs = static_cast<uint32_t>(
+                                        (decoded % fmt.sampleRate) * 1000 / fmt.sampleRate);
+                                    slimproto->updateElapsed(elapsedSec, elapsedMs);
+
+                                    // Log elapsed every 10 seconds
+                                    if (elapsedSec >= lastElapsedLog + 10) {
+                                        lastElapsedLog = elapsedSec;
+                                        uint32_t totalSec = fmt.totalSamples > 0
+                                            ? static_cast<uint32_t>(fmt.totalSamples / fmt.sampleRate) : 0;
+                                        LOG_DEBUG("[Audio] Elapsed: " << elapsedSec << "s"
+                                                  << (totalSec > 0 ? " / " + std::to_string(totalSec) + "s" : "")
+                                                  << " (" << decoded << " frames)");
+                                    }
                                 }
                             }
 
-                            // Tell LMS we have enough data to start
-                            slimproto->sendStat(StatEvent::STMl);
+                            // TODO: Phase 5 - Push decoded frames to DirettaSync
                         }
 
-                        // Update stream bytes for STAT messages
-                        slimproto->updateStreamBytes(totalBytes);
-
-                        // TODO: Phase 4/5 - Feed to decoder instead of discarding
+                        if (decoder->hasError()) {
+                            LOG_ERROR("[Audio] Decoder error");
+                            break;
+                        }
                     }
 
-                    LOG_INFO("[HTTP] Stream ended (" << totalBytes << " bytes received)");
-
-                    if (totalBytes > 0) {
-                        slimproto->sendStat(StatEvent::STMd);  // Decoder finished
-                        slimproto->sendStat(StatEvent::STMu);  // Underrun (natural end)
+                    // Drain remaining decoded frames after HTTP stream ends
+                    decoder->setEof();
+                    while (!decoder->isFinished() && !decoder->hasError() &&
+                           audioTestRunning.load(std::memory_order_acquire)) {
+                        size_t frames = decoder->readDecoded(decodeBuf, MAX_DECODE_FRAMES);
+                        if (frames == 0) break;
                     }
+
+                    // Final elapsed time
+                    if (decoder->isFormatReady()) {
+                        auto fmt = decoder->getFormat();
+                        uint64_t decoded = decoder->getDecodedSamples();
+                        uint32_t elapsedSec = fmt.sampleRate > 0
+                            ? static_cast<uint32_t>(decoded / fmt.sampleRate) : 0;
+                        LOG_INFO("[Audio] Stream complete: " << totalBytes << " bytes received, "
+                                 << decoded << " frames decoded (" << elapsedSec << "s)");
+                    } else {
+                        LOG_INFO("[Audio] Stream ended (" << totalBytes << " bytes received)");
+                    }
+
+                    slimproto->sendStat(StatEvent::STMd);  // Decoder finished
+                    slimproto->sendStat(StatEvent::STMu);  // Underrun (natural end)
+                    audioThreadDone.store(true, std::memory_order_release);
                 });
                 break;
             }
@@ -382,9 +450,7 @@ int main(int argc, char* argv[]) {
                 LOG_INFO("Stream stop requested");
                 audioTestRunning.store(false);
                 httpStream->disconnect();
-                if (audioTestThread.joinable()) {
-                    audioTestThread.join();
-                }
+                // Don't join here — strm-s or shutdown will join
                 slimproto->sendStat(StatEvent::STMf);  // Flushed
                 break;
 
@@ -402,9 +468,7 @@ int main(int argc, char* argv[]) {
                 LOG_INFO("Flush requested");
                 audioTestRunning.store(false);
                 httpStream->disconnect();
-                if (audioTestThread.joinable()) {
-                    audioTestThread.join();
-                }
+                // Don't join here — strm-s or shutdown will join
                 slimproto->sendStat(StatEvent::STMf);
                 break;
 
@@ -443,7 +507,17 @@ int main(int argc, char* argv[]) {
     audioTestRunning.store(false);
     httpStream->disconnect();
     if (audioTestThread.joinable()) {
-        audioTestThread.join();
+        // Wait up to 1s for the audio thread to finish
+        auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+        while (!audioThreadDone.load(std::memory_order_acquire) &&
+               std::chrono::steady_clock::now() < deadline) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        if (audioThreadDone.load(std::memory_order_acquire)) {
+            audioTestThread.join();
+        } else {
+            audioTestThread.detach();
+        }
     }
     g_slimproto = nullptr;
     slimproto->disconnect();
