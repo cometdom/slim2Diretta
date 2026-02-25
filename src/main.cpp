@@ -8,6 +8,7 @@
 
 #include "Config.h"
 #include "SlimprotoClient.h"
+#include "HttpStreamClient.h"
 #include "DirettaSync.h"
 #include "LogLevel.h"
 
@@ -17,6 +18,7 @@
 #include <thread>
 #include <chrono>
 #include <atomic>
+#include <iomanip>
 #include <cstring>
 
 #define SLIM2DIRETTA_VERSION "0.1.0"
@@ -271,25 +273,141 @@ int main(int argc, char* argv[]) {
     auto slimproto = std::make_unique<SlimprotoClient>();
     g_slimproto = slimproto.get();
 
-    // Register stream callback (placeholder until PlayerController exists)
-    slimproto->onStream([](const StrmCommand& cmd, const std::string& httpRequest) {
+    // HTTP stream client (shared between callbacks and potential audio thread)
+    auto httpStream = std::make_shared<HttpStreamClient>();
+    std::thread audioTestThread;
+    std::atomic<bool> audioTestRunning{false};
+
+    // Register stream callback
+    slimproto->onStream([&](const StrmCommand& cmd, const std::string& httpRequest) {
         switch (cmd.command) {
-            case STRM_START:
+            case STRM_START: {
                 LOG_INFO("Stream start requested (format=" << cmd.format << ")");
-                // TODO: Phase 5 - PlayerController handles this
+
+                // Stop any previous audio test thread
+                audioTestRunning.store(false);
+                httpStream->disconnect();
+                if (audioTestThread.joinable()) {
+                    audioTestThread.join();
+                }
+
+                // Determine server IP (0 = use control connection IP)
+                std::string streamIp = slimproto->getServerIp();
+                if (cmd.serverIp != 0) {
+                    struct in_addr addr;
+                    addr.s_addr = cmd.serverIp;  // Already in network byte order
+                    streamIp = inet_ntoa(addr);
+                }
+                uint16_t streamPort = cmd.getServerPort();
+                if (streamPort == 0) streamPort = SLIMPROTO_HTTP_PORT;
+
+                // Connect HTTP stream
+                if (!httpStream->connect(streamIp, streamPort, httpRequest)) {
+                    LOG_ERROR("Failed to connect to audio stream");
+                    slimproto->sendStat(StatEvent::STMn);
+                    break;
+                }
+
+                // Send STAT sequence to LMS
+                slimproto->sendStat(StatEvent::STMc);  // Connected
+                slimproto->sendResp(httpStream->getResponseHeaders());
+                slimproto->sendStat(StatEvent::STMh);  // Headers received
+
+                // Start reading audio data in a test thread
+                audioTestRunning.store(true);
+                audioTestThread = std::thread([&httpStream, &slimproto, &audioTestRunning]() {
+                    uint8_t buf[16384];
+                    bool firstRead = true;
+                    uint64_t totalBytes = 0;
+
+                    while (audioTestRunning.load(std::memory_order_acquire) &&
+                           httpStream->isConnected()) {
+                        ssize_t n = httpStream->read(buf, sizeof(buf));
+                        if (n <= 0) break;
+
+                        totalBytes += n;
+
+                        if (firstRead) {
+                            firstRead = false;
+                            slimproto->sendStat(StatEvent::STMs);  // Stream started
+
+                            // Log first 64 bytes as hex dump
+                            std::ostringstream hex;
+                            hex << std::hex << std::setfill('0');
+                            for (int i = 0; i < std::min(static_cast<int>(n), 64); i++) {
+                                if (i > 0 && i % 16 == 0) hex << "\n                    ";
+                                hex << std::setw(2) << static_cast<int>(buf[i]) << " ";
+                            }
+                            LOG_INFO("[HTTP] First bytes: " << hex.str());
+
+                            // Identify format from magic bytes
+                            if (n >= 4) {
+                                if (buf[0] == 'f' && buf[1] == 'L' && buf[2] == 'a' && buf[3] == 'C') {
+                                    LOG_INFO("[HTTP] FLAC stream detected");
+                                } else if (buf[0] == 'R' && buf[1] == 'I' && buf[2] == 'F' && buf[3] == 'F') {
+                                    LOG_INFO("[HTTP] WAV stream detected");
+                                } else if (buf[0] == 'F' && buf[1] == 'O' && buf[2] == 'R' && buf[3] == 'M') {
+                                    LOG_INFO("[HTTP] AIFF stream detected");
+                                } else {
+                                    LOG_INFO("[HTTP] Unknown format (magic: 0x"
+                                             << std::hex << std::setfill('0')
+                                             << std::setw(2) << (int)buf[0]
+                                             << std::setw(2) << (int)buf[1]
+                                             << std::setw(2) << (int)buf[2]
+                                             << std::setw(2) << (int)buf[3] << std::dec << ")");
+                                }
+                            }
+
+                            // Tell LMS we have enough data to start
+                            slimproto->sendStat(StatEvent::STMl);
+                        }
+
+                        // Update stream bytes for STAT messages
+                        slimproto->updateStreamBytes(totalBytes);
+
+                        // TODO: Phase 4/5 - Feed to decoder instead of discarding
+                    }
+
+                    LOG_INFO("[HTTP] Stream ended (" << totalBytes << " bytes received)");
+
+                    if (totalBytes > 0) {
+                        slimproto->sendStat(StatEvent::STMd);  // Decoder finished
+                        slimproto->sendStat(StatEvent::STMu);  // Underrun (natural end)
+                    }
+                });
                 break;
+            }
+
             case STRM_STOP:
                 LOG_INFO("Stream stop requested");
+                audioTestRunning.store(false);
+                httpStream->disconnect();
+                if (audioTestThread.joinable()) {
+                    audioTestThread.join();
+                }
+                slimproto->sendStat(StatEvent::STMf);  // Flushed
                 break;
+
             case STRM_PAUSE:
                 LOG_INFO("Pause requested");
+                slimproto->sendStat(StatEvent::STMp);
                 break;
+
             case STRM_UNPAUSE:
                 LOG_INFO("Unpause requested");
+                slimproto->sendStat(StatEvent::STMr);
                 break;
+
             case STRM_FLUSH:
                 LOG_INFO("Flush requested");
+                audioTestRunning.store(false);
+                httpStream->disconnect();
+                if (audioTestThread.joinable()) {
+                    audioTestThread.join();
+                }
+                slimproto->sendStat(StatEvent::STMf);
                 break;
+
             default:
                 break;
         }
@@ -322,6 +440,11 @@ int main(int argc, char* argv[]) {
 
     // Clean shutdown
     std::cout << "\nShutting down..." << std::endl;
+    audioTestRunning.store(false);
+    httpStream->disconnect();
+    if (audioTestThread.joinable()) {
+        audioTestThread.join();
+    }
     g_slimproto = nullptr;
     slimproto->disconnect();
     if (slimprotoThread.joinable()) {
