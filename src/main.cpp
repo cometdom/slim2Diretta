@@ -375,7 +375,7 @@ int main(int argc, char* argv[]) {
 
                     slimproto->sendStat(StatEvent::STMs);  // Stream started
 
-                    uint8_t httpBuf[16384];
+                    uint8_t httpBuf[65536];
                     // Decode buffer: up to 1024 frames * 2 channels
                     constexpr size_t MAX_DECODE_FRAMES = 1024;
                     int32_t decodeBuf[MAX_DECODE_FRAMES * 2];
@@ -472,17 +472,13 @@ int main(int argc, char* argv[]) {
                                     LOG_INFO("[Audio] Pre-buffered " << prebufferFrames
                                              << " frames (" << prebufMs << "ms)");
 
+                                    // Push prebuffer at full speed (no flow control)
+                                    // Buffer starts empty after stopPlayback, so no
+                                    // risk of overflow during initial fill
                                     const int32_t* ptr = prebuffer.data();
                                     size_t remaining = prebufferFrames;
                                     while (remaining > 0 &&
                                            audioTestRunning.load(std::memory_order_relaxed)) {
-                                        if (direttaPtr->getBufferLevel() > 0.95f) {
-                                            std::unique_lock<std::mutex> lock(
-                                                direttaPtr->getFlowMutex());
-                                            direttaPtr->waitForSpace(lock,
-                                                std::chrono::milliseconds(10));
-                                            continue;
-                                        }
                                         size_t chunk = std::min(remaining, MAX_DECODE_FRAMES);
                                         direttaPtr->sendAudio(
                                             reinterpret_cast<const uint8_t*>(ptr), chunk);
@@ -520,14 +516,16 @@ int main(int argc, char* argv[]) {
                             }
 
                             // Flow control: wait when paused or buffer near full
+                            // Threshold 0.95 with short 5ms wait to avoid
+                            // throttling throughput below consumption rate
                             while (audioTestRunning.load(std::memory_order_acquire)) {
                                 if (direttaPtr->isPaused()) {
                                     std::this_thread::sleep_for(std::chrono::milliseconds(100));
                                     continue;
                                 }
-                                if (direttaPtr->getBufferLevel() > 0.9f) {
+                                if (direttaPtr->getBufferLevel() > 0.95f) {
                                     std::unique_lock<std::mutex> lock(direttaPtr->getFlowMutex());
-                                    direttaPtr->waitForSpace(lock, std::chrono::milliseconds(50));
+                                    direttaPtr->waitForSpace(lock, std::chrono::milliseconds(5));
                                     continue;
                                 }
                                 break;
@@ -586,14 +584,16 @@ int main(int argc, char* argv[]) {
 
                         if (direttaOpened) {
                             // Flow control: wait when paused or buffer near full
+                            // Threshold 0.95 with short 5ms wait to avoid
+                            // throttling throughput below consumption rate
                             while (audioTestRunning.load(std::memory_order_acquire)) {
                                 if (direttaPtr->isPaused()) {
                                     std::this_thread::sleep_for(std::chrono::milliseconds(100));
                                     continue;
                                 }
-                                if (direttaPtr->getBufferLevel() > 0.9f) {
+                                if (direttaPtr->getBufferLevel() > 0.95f) {
                                     std::unique_lock<std::mutex> lock(direttaPtr->getFlowMutex());
-                                    direttaPtr->waitForSpace(lock, std::chrono::milliseconds(50));
+                                    direttaPtr->waitForSpace(lock, std::chrono::milliseconds(5));
                                     continue;
                                 }
                                 break;
