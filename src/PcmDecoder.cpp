@@ -75,7 +75,12 @@ size_t PcmDecoder::readDecoded(int32_t* out, size_t maxFrames) {
     size_t framesAvail = availBytes / bytesPerFrame;
     size_t framesToConvert = std::min(framesAvail, maxFrames);
     if (framesToConvert == 0) {
-        if (m_eof || (m_dataRemaining > 0 && availBytes < bytesPerFrame)) {
+        // Only finish when we know no more data will arrive:
+        // - EOF signaled by caller (HTTP stream ended)
+        // - All data chunk bytes consumed (m_dataRemaining reached 0 via subtraction)
+        // Do NOT finish just because the buffer is temporarily empty —
+        // more data may arrive from the next HTTP read.
+        if (m_eof) {
             m_finished = true;
         }
         return 0;
