@@ -294,6 +294,25 @@ int main(int argc, char* argv[]) {
 
     std::cout << "Diretta target #" << config.direttaTarget << " enabled" << std::endl;
 
+    // SDK warm-up: open/close with a dummy format so the first real track
+    // gets "quick resume" behavior instead of full SDK initialization.
+    // Without this, the first track suffers ~24 underruns while the SDK
+    // initializes its worker thread and network path.
+    {
+        AudioFormat warmupFmt;
+        warmupFmt.sampleRate = 44100;
+        warmupFmt.bitDepth = 32;
+        warmupFmt.channels = 2;
+        warmupFmt.isCompressed = false;
+        diretta->setS24PackModeHint(DirettaRingBuffer::S24PackMode::MsbAligned);
+        if (diretta->open(warmupFmt)) {
+            LOG_INFO("SDK warm-up complete (open/close at 44100/32/2)");
+            diretta->close();
+        } else {
+            LOG_WARN("SDK warm-up open() failed — first track may have underruns");
+        }
+    }
+
     // Create Slimproto client and connect to LMS
     auto slimproto = std::make_unique<SlimprotoClient>();
     g_slimproto = slimproto.get();

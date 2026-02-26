@@ -86,6 +86,7 @@ private:
     bool m_error = false;
     bool m_finished = false;
     uint64_t m_decodedSamples = 0;
+    unsigned m_metadataRetries = 0;  // Count of metadata incomplete retries
 };
 
 #endif // SLIM2DIRETTA_FLAC_DECODER_H

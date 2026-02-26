@@ -103,8 +103,17 @@ size_t FlacDecoder::readDecoded(int32_t* out, size_t maxFrames) {
                 FLAC__stream_decoder_delete(m_decoder);
                 m_decoder = nullptr;
                 m_initialized = false;
-                LOG_DEBUG("[FLAC] Metadata incomplete, need more data ("
-                          << m_inputBuffer.size() << " bytes buffered)");
+                m_metadataRetries++;
+                // Log first attempt and then only every 50th to avoid spam
+                // (Qobuz streams with large album art can need 100+ retries)
+                if (m_metadataRetries == 1) {
+                    LOG_DEBUG("[FLAC] Metadata incomplete, need more data ("
+                              << m_inputBuffer.size() << " bytes buffered)");
+                } else if (m_metadataRetries % 50 == 0) {
+                    LOG_DEBUG("[FLAC] Metadata still incomplete after "
+                              << m_metadataRetries << " retries ("
+                              << m_inputBuffer.size() << " bytes buffered)");
+                }
                 return 0;
             }
 
@@ -120,7 +129,12 @@ size_t FlacDecoder::readDecoded(int32_t* out, size_t maxFrames) {
         }
 
         m_metadataDone = true;
-        LOG_DEBUG("[FLAC] Metadata complete, starting audio decode");
+        if (m_metadataRetries > 0) {
+            LOG_DEBUG("[FLAC] Metadata complete after " << m_metadataRetries
+                      << " retries (" << m_inputBuffer.size() << " bytes buffered)");
+        } else {
+            LOG_DEBUG("[FLAC] Metadata complete, starting audio decode");
+        }
 
         // Use get_decode_position to find exact metadata/audio boundary.
         // This excludes read-ahead bytes in libFLAC's internal buffer,
@@ -263,6 +277,7 @@ void FlacDecoder::flush() {
     m_finished = false;
     m_eof = false;
     m_decodedSamples = 0;
+    m_metadataRetries = 0;
 }
 
 // ============================================
