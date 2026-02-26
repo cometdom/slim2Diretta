@@ -23,6 +23,12 @@
 #include <cstring>
 #include <vector>
 
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <poll.h>
+
 #define SLIM2DIRETTA_VERSION "0.1.0"
 
 // ============================================
@@ -80,6 +86,61 @@ void statsSignalHandler(int /*signal*/) {
     if (g_diretta) {
         g_diretta->dumpStats();
     }
+}
+
+// ============================================
+// LMS Autodiscovery
+// ============================================
+
+/**
+ * @brief Discover LMS server via UDP broadcast on port 3483
+ *
+ * Sends 'e' packet as broadcast, LMS responds from its IP.
+ * Same method as squeezelite (MIT reference).
+ *
+ * @param timeoutSec Timeout per attempt in seconds
+ * @param retries Number of discovery attempts
+ * @return Server IP as string, or empty on failure
+ */
+std::string discoverLMS(int timeoutSec = 5, int retries = 3) {
+    for (int attempt = 0; attempt < retries; attempt++) {
+        int sock = socket(AF_INET, SOCK_DGRAM, 0);
+        if (sock < 0) return "";
+
+        int broadcast = 1;
+        setsockopt(sock, SOL_SOCKET, SO_BROADCAST, &broadcast, sizeof(broadcast));
+
+        struct sockaddr_in bcastAddr{};
+        bcastAddr.sin_family = AF_INET;
+        bcastAddr.sin_port = htons(3483);
+        bcastAddr.sin_addr.s_addr = htonl(INADDR_BROADCAST);
+
+        const char msg = 'e';
+        sendto(sock, &msg, 1, 0,
+               reinterpret_cast<struct sockaddr*>(&bcastAddr), sizeof(bcastAddr));
+
+        struct pollfd pfd = {sock, POLLIN, 0};
+        if (poll(&pfd, 1, timeoutSec * 1000) > 0) {
+            char buf[32];
+            struct sockaddr_in serverAddr{};
+            socklen_t slen = sizeof(serverAddr);
+            ssize_t n = recvfrom(sock, buf, sizeof(buf), 0,
+                                 reinterpret_cast<struct sockaddr*>(&serverAddr), &slen);
+            ::close(sock);
+            if (n > 0) {
+                std::string ip = inet_ntoa(serverAddr.sin_addr);
+                LOG_INFO("Discovered LMS at " << ip
+                         << " (attempt " << (attempt + 1) << ")");
+                return ip;
+            }
+        }
+        ::close(sock);
+
+        if (attempt < retries - 1) {
+            LOG_DEBUG("Discovery attempt " << (attempt + 1) << " timed out, retrying...");
+        }
+    }
+    return "";
 }
 
 // ============================================
@@ -160,7 +221,7 @@ Config parseArguments(int argc, char* argv[]) {
             std::cout << "slim2diretta - Native LMS player with Diretta output\n\n"
                       << "Usage: " << argv[0] << " [options]\n\n"
                       << "LMS Connection:\n"
-                      << "  -s, --server <ip>      LMS server address (required)\n"
+                      << "  -s, --server <ip>      LMS server address (auto-discover if omitted)\n"
                       << "  -p, --port <port>      Slimproto port (default: 3483)\n"
                       << "  -n, --name <name>      Player name (default: slim2diretta)\n"
                       << "  -m, --mac <addr>       MAC address (default: auto-generate)\n"
@@ -185,6 +246,7 @@ Config parseArguments(int argc, char* argv[]) {
                       << "  -h, --help             Show this help\n"
                       << "\n"
                       << "Examples:\n"
+                      << "  sudo " << argv[0] << " --target 1                              # Auto-discover LMS\n"
                       << "  sudo " << argv[0] << " -s 192.168.1.10 --target 1\n"
                       << "  sudo " << argv[0] << " -s 192.168.1.10 --target 1 -n \"Living Room\" -v\n"
                       << std::endl;
@@ -246,12 +308,16 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
-    // Validate required parameters
+    // Validate required parameters — autodiscover LMS if not specified
     if (config.lmsServer.empty()) {
-        std::cerr << "Error: LMS server address required (-s <ip>)" << std::endl;
-        std::cerr << "Use --help for usage information" << std::endl;
-        shutdownAsyncLogging();
-        return 1;
+        std::cout << "No LMS server specified, searching..." << std::endl;
+        config.lmsServer = discoverLMS();
+        if (config.lmsServer.empty()) {
+            std::cerr << "Error: Could not discover LMS server" << std::endl;
+            std::cerr << "Specify manually with -s <ip>" << std::endl;
+            shutdownAsyncLogging();
+            return 1;
+        }
     }
 
     if (config.direttaTarget < 1) {
@@ -665,55 +731,107 @@ int main(int argc, char* argv[]) {
                   << std::dec << " (ignored - bit-perfect)");
     });
 
-    if (!slimproto->connect(config.lmsServer, config.lmsPort, config)) {
-        std::cerr << "Failed to connect to LMS" << std::endl;
-        diretta->disable();
-        g_diretta = nullptr;
-        shutdownAsyncLogging();
-        return 1;
-    }
-
-    // Run slimproto receive loop in a dedicated thread
-    std::thread slimprotoThread([&slimproto]() {
-        slimproto->run();
-    });
-
-    std::cout << "Player registered with LMS" << std::endl;
-    std::cout << "(Press Ctrl+C to stop)" << std::endl;
-    std::cout << std::endl;
-
-    // Wait for shutdown signal
-    while (g_running.load(std::memory_order_acquire) && slimproto->isConnected()) {
-        std::this_thread::sleep_for(std::chrono::seconds(1));
-    }
-
-    // Clean shutdown
-    std::cout << "\nShutting down..." << std::endl;
-    audioTestRunning.store(false);
-    httpStream->disconnect();
-    if (audioTestThread.joinable()) {
-        // Wait up to 1s for the audio thread to finish
-        auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
-        while (!audioThreadDone.load(std::memory_order_acquire) &&
-               std::chrono::steady_clock::now() < deadline) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    // Helper: stop audio thread and wait for it to finish
+    auto stopAudioThread = [&]() {
+        audioTestRunning.store(false);
+        httpStream->disconnect();
+        if (audioTestThread.joinable()) {
+            auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+            while (!audioThreadDone.load(std::memory_order_acquire) &&
+                   std::chrono::steady_clock::now() < deadline) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            }
+            if (audioThreadDone.load(std::memory_order_acquire)) {
+                audioTestThread.join();
+            } else {
+                audioTestThread.detach();
+                LOG_WARN("Audio thread did not stop in time, detached");
+            }
         }
-        if (audioThreadDone.load(std::memory_order_acquire)) {
-            audioTestThread.join();
+        if (direttaPtr->isPlaying()) direttaPtr->stopPlayback(true);
+    };
+
+    // Helper: interruptible sleep (returns false if shutdown requested)
+    auto interruptibleSleep = [](int seconds) -> bool {
+        for (int i = 0; i < seconds * 10; i++) {
+            if (!g_running.load(std::memory_order_acquire)) return false;
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+        return true;
+    };
+
+    // ============================================
+    // Connection loop with exponential backoff
+    // ============================================
+
+    constexpr int INITIAL_BACKOFF_S = 2;
+    constexpr int MAX_BACKOFF_S = 30;
+    int backoffS = INITIAL_BACKOFF_S;
+    int connectionCount = 0;
+
+    while (g_running.load(std::memory_order_acquire)) {
+        // Wait before reconnection (skip on first attempt)
+        if (connectionCount > 0) {
+            LOG_WARN("Reconnecting to LMS in " << backoffS << "s...");
+            if (!interruptibleSleep(backoffS)) break;
+            backoffS = std::min(backoffS * 2, MAX_BACKOFF_S);
+        }
+
+        // Connect to LMS
+        if (!slimproto->connect(config.lmsServer, config.lmsPort, config)) {
+            if (g_running.load(std::memory_order_acquire)) {
+                LOG_WARN("Failed to connect to LMS");
+                // Start backoff even on first attempt failure
+                if (connectionCount == 0) connectionCount = 1;
+            }
+            continue;
+        }
+
+        // Success — reset backoff
+        backoffS = INITIAL_BACKOFF_S;
+        connectionCount++;
+
+        // Run slimproto receive loop in a dedicated thread
+        std::thread slimprotoThread([&slimproto]() {
+            slimproto->run();
+        });
+
+        if (connectionCount == 1) {
+            LOG_INFO("Player registered with LMS");
+            std::cout << "(Press Ctrl+C to stop)" << std::endl;
         } else {
-            audioTestThread.detach();
+            LOG_INFO("Reconnected to LMS");
         }
+        std::cout << std::endl;
+
+        // Wait for shutdown signal or connection loss
+        while (g_running.load(std::memory_order_acquire) && slimproto->isConnected()) {
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+
+        // Cleanup: stop audio, disconnect slimproto, join thread
+        stopAudioThread();
+        slimproto->disconnect();
+        if (slimprotoThread.joinable()) {
+            slimprotoThread.join();
+        }
+
+        if (!g_running.load(std::memory_order_acquire)) break;
+        LOG_WARN("Lost connection to LMS");
     }
-    // Shutdown DirettaSync
+
+    // ============================================
+    // Final shutdown
+    // ============================================
+
+    std::cout << "\nShutting down..." << std::endl;
+    stopAudioThread();
+    g_slimproto = nullptr;
+    slimproto->disconnect();
+
     if (diretta->isOpen()) diretta->close();
     diretta->disable();
     g_diretta = nullptr;
-
-    g_slimproto = nullptr;
-    slimproto->disconnect();
-    if (slimprotoThread.joinable()) {
-        slimprotoThread.join();
-    }
 
     shutdownAsyncLogging();
     return 0;
