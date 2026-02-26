@@ -64,6 +64,7 @@ void shutdownAsyncLogging() {
 
 std::atomic<bool> g_running{true};
 SlimprotoClient* g_slimproto = nullptr;  // For signal handler access
+DirettaSync* g_diretta = nullptr;        // For SIGUSR1 stats dump
 
 void signalHandler(int signal) {
     std::cout << "\nSignal " << signal << " received, shutting down..." << std::endl;
@@ -75,8 +76,9 @@ void signalHandler(int signal) {
 }
 
 void statsSignalHandler(int /*signal*/) {
-    // TODO: Phase 5 - PlayerController::dumpStats()
-    LOG_INFO("SIGUSR1 received (stats dump not yet implemented)");
+    if (g_diretta) {
+        g_diretta->dumpStats();
+    }
 }
 
 // ============================================
@@ -270,6 +272,27 @@ int main(int argc, char* argv[]) {
     }
     std::cout << std::endl;
 
+    // Create and enable DirettaSync
+    auto diretta = std::make_unique<DirettaSync>();
+    diretta->setTargetIndex(config.direttaTarget - 1);  // CLI 1-indexed → API 0-indexed
+    if (config.mtu > 0) diretta->setMTU(config.mtu);
+
+    DirettaConfig direttaConfig;
+    direttaConfig.threadMode = config.threadMode;
+    direttaConfig.cycleTime = config.cycleTime;
+    direttaConfig.cycleTimeAuto = config.cycleTimeAuto;
+    if (config.mtu > 0) direttaConfig.mtu = config.mtu;
+
+    if (!diretta->enable(direttaConfig)) {
+        std::cerr << "Failed to enable Diretta target #" << config.direttaTarget << std::endl;
+        shutdownAsyncLogging();
+        return 1;
+    }
+    g_diretta = diretta.get();
+    DirettaSync* direttaPtr = diretta.get();  // For lambda captures
+
+    std::cout << "Diretta target #" << config.direttaTarget << " enabled" << std::endl;
+
     // Create Slimproto client and connect to LMS
     auto slimproto = std::make_unique<SlimprotoClient>();
     g_slimproto = slimproto.get();
@@ -286,7 +309,12 @@ int main(int argc, char* argv[]) {
             case STRM_START: {
                 LOG_INFO("Stream start requested (format=" << cmd.format << ")");
 
-                // Stop any previous audio test thread
+                // Stop previous playback
+                if (direttaPtr->isPlaying()) {
+                    direttaPtr->stopPlayback(true);
+                }
+
+                // Stop any previous audio thread
                 audioTestRunning.store(false);
                 httpStream->disconnect();
                 if (audioTestThread.joinable()) {
@@ -334,7 +362,7 @@ int main(int argc, char* argv[]) {
                 char formatCode = cmd.format;
                 audioTestRunning.store(true);
                 audioThreadDone.store(false, std::memory_order_release);
-                audioTestThread = std::thread([&httpStream, &slimproto, &audioTestRunning, &audioThreadDone, formatCode]() {
+                audioTestThread = std::thread([&httpStream, &slimproto, &audioTestRunning, &audioThreadDone, formatCode, direttaPtr]() {
                     // Create decoder for this format
                     auto decoder = Decoder::create(formatCode);
                     if (!decoder) {
@@ -374,17 +402,35 @@ int main(int argc, char* argv[]) {
                             size_t frames = decoder->readDecoded(decodeBuf, MAX_DECODE_FRAMES);
                             if (frames == 0) break;
 
-                            // Log format on first successful decode
+                            // Open DirettaSync on first successful decode
                             if (!formatLogged && decoder->isFormatReady()) {
                                 formatLogged = true;
                                 auto fmt = decoder->getFormat();
-                                LOG_INFO("[Audio] Decoding: " << fmt.sampleRate << " Hz, "
-                                         << fmt.bitDepth << "-bit, " << fmt.channels << " ch"
-                                         << (fmt.totalSamples > 0
-                                             ? " (" + std::to_string(fmt.totalSamples * fmt.channels * (fmt.bitDepth/8) / 1048576) + " MB decoded)"
-                                             : ""));
 
-                                // Tell LMS we have enough data to start
+                                LOG_INFO("[Audio] Decoding: " << fmt.sampleRate << " Hz, "
+                                         << fmt.bitDepth << "-bit, " << fmt.channels << " ch");
+
+                                // Build AudioFormat for DirettaSync
+                                AudioFormat audioFmt;
+                                audioFmt.sampleRate = fmt.sampleRate;
+                                audioFmt.bitDepth = fmt.bitDepth;
+                                audioFmt.channels = fmt.channels;
+                                audioFmt.isCompressed = (formatCode == 'f');  // FLAC
+
+                                // MSB-aligned hint for 24-bit (decoder outputs sample << shift)
+                                if (fmt.bitDepth == 24) {
+                                    direttaPtr->setS24PackModeHint(
+                                        DirettaRingBuffer::S24PackMode::MsbAligned);
+                                }
+
+                                if (!direttaPtr->open(audioFmt)) {
+                                    LOG_ERROR("[Audio] Failed to open Diretta output");
+                                    slimproto->sendStat(StatEvent::STMn);
+                                    audioThreadDone.store(true, std::memory_order_release);
+                                    return;
+                                }
+
+                                // Tell LMS we're ready to play
                                 slimproto->sendStat(StatEvent::STMl);
                             }
 
@@ -410,7 +456,17 @@ int main(int argc, char* argv[]) {
                                 }
                             }
 
-                            // TODO: Phase 5 - Push decoded frames to DirettaSync
+                            // Push decoded frames to DirettaSync
+                            // sendAudio expects raw S32_LE, numSamples = frame count
+                            direttaPtr->sendAudio(
+                                reinterpret_cast<const uint8_t*>(decodeBuf),
+                                frames);
+
+                            // Flow control: pace decode when ring buffer is near full
+                            if (direttaPtr->getBufferLevel() > 0.9f) {
+                                std::unique_lock<std::mutex> lock(direttaPtr->getFlowMutex());
+                                direttaPtr->waitForSpace(lock, std::chrono::milliseconds(50));
+                            }
                         }
 
                         if (decoder->hasError()) {
@@ -425,6 +481,29 @@ int main(int argc, char* argv[]) {
                            audioTestRunning.load(std::memory_order_acquire)) {
                         size_t frames = decoder->readDecoded(decodeBuf, MAX_DECODE_FRAMES);
                         if (frames == 0) break;
+
+                        if (formatLogged) {
+                            direttaPtr->sendAudio(
+                                reinterpret_cast<const uint8_t*>(decodeBuf),
+                                frames);
+
+                            if (direttaPtr->getBufferLevel() > 0.9f) {
+                                std::unique_lock<std::mutex> lock(direttaPtr->getFlowMutex());
+                                direttaPtr->waitForSpace(lock, std::chrono::milliseconds(50));
+                            }
+                        }
+
+                        // Update elapsed during drain
+                        if (decoder->isFormatReady()) {
+                            auto fmt = decoder->getFormat();
+                            if (fmt.sampleRate > 0) {
+                                uint64_t decoded = decoder->getDecodedSamples();
+                                uint32_t elapsedSec = static_cast<uint32_t>(decoded / fmt.sampleRate);
+                                uint32_t elapsedMs = static_cast<uint32_t>(
+                                    (decoded % fmt.sampleRate) * 1000 / fmt.sampleRate);
+                                slimproto->updateElapsed(elapsedSec, elapsedMs);
+                            }
+                        }
                     }
 
                     // Final elapsed time
@@ -450,17 +529,19 @@ int main(int argc, char* argv[]) {
                 LOG_INFO("Stream stop requested");
                 audioTestRunning.store(false);
                 httpStream->disconnect();
-                // Don't join here — strm-s or shutdown will join
+                if (direttaPtr->isPlaying()) direttaPtr->stopPlayback(true);
                 slimproto->sendStat(StatEvent::STMf);  // Flushed
                 break;
 
             case STRM_PAUSE:
                 LOG_INFO("Pause requested");
+                direttaPtr->pausePlayback();
                 slimproto->sendStat(StatEvent::STMp);
                 break;
 
             case STRM_UNPAUSE:
                 LOG_INFO("Unpause requested");
+                direttaPtr->resumePlayback();
                 slimproto->sendStat(StatEvent::STMr);
                 break;
 
@@ -468,7 +549,7 @@ int main(int argc, char* argv[]) {
                 LOG_INFO("Flush requested");
                 audioTestRunning.store(false);
                 httpStream->disconnect();
-                // Don't join here — strm-s or shutdown will join
+                if (direttaPtr->isPlaying()) direttaPtr->stopPlayback(true);
                 slimproto->sendStat(StatEvent::STMf);
                 break;
 
@@ -484,6 +565,8 @@ int main(int argc, char* argv[]) {
 
     if (!slimproto->connect(config.lmsServer, config.lmsPort, config)) {
         std::cerr << "Failed to connect to LMS" << std::endl;
+        diretta->disable();
+        g_diretta = nullptr;
         shutdownAsyncLogging();
         return 1;
     }
@@ -519,6 +602,11 @@ int main(int argc, char* argv[]) {
             audioTestThread.detach();
         }
     }
+    // Shutdown DirettaSync
+    if (diretta->isOpen()) diretta->close();
+    diretta->disable();
+    g_diretta = nullptr;
+
     g_slimproto = nullptr;
     slimproto->disconnect();
     if (slimprotoThread.joinable()) {
