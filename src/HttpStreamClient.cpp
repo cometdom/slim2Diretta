@@ -11,6 +11,7 @@
 #include <netinet/tcp.h>
 #include <arpa/inet.h>
 #include <unistd.h>
+#include <poll.h>
 
 #include <cstring>
 #include <algorithm>
@@ -119,6 +120,32 @@ ssize_t HttpStreamClient::read(uint8_t* buf, size_t maxLen) {
         return -1;
     }
     return n;
+}
+
+ssize_t HttpStreamClient::readWithTimeout(uint8_t* buf, size_t maxLen, int timeoutMs) {
+    if (m_socket < 0) return -1;
+
+    struct pollfd pfd;
+    pfd.fd = m_socket;
+    pfd.events = POLLIN;
+    pfd.revents = 0;
+
+    int ready = poll(&pfd, 1, timeoutMs);
+    if (ready < 0) {
+        if (errno == EINTR) return 0;
+        LOG_ERROR("[HTTP] Poll error: " << strerror(errno));
+        m_connected.store(false, std::memory_order_release);
+        return -1;
+    }
+    if (ready == 0) return 0;  // Timeout - no data available
+
+    // Check for errors/hangup on the socket
+    if (pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) {
+        m_connected.store(false, std::memory_order_release);
+        return -1;
+    }
+
+    return read(buf, maxLen);
 }
 
 bool HttpStreamClient::sendAll(const void* buf, size_t len) {

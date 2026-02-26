@@ -383,24 +383,39 @@ int main(int argc, char* argv[]) {
                     uint64_t lastElapsedLog = 0;
 
                     // Read HTTP -> feed decoder -> read decoded frames
+                    // Uses readWithTimeout to avoid blocking on recv() which
+                    // would starve the ring buffer during network waits.
+                    bool httpEof = false;
                     while (audioTestRunning.load(std::memory_order_acquire) &&
-                           httpStream->isConnected()) {
-                        ssize_t n = httpStream->read(httpBuf, sizeof(httpBuf));
-                        if (n <= 0) {
-                            if (n == 0) decoder->setEof();
-                            break;
+                           !httpEof) {
+                        // Non-blocking HTTP read (2ms timeout)
+                        // Short timeout keeps ring buffer fed even during
+                        // network stalls at high sample rates (768kHz+ = 6MB/s)
+                        bool gotData = false;
+                        if (httpStream->isConnected()) {
+                            ssize_t n = httpStream->readWithTimeout(httpBuf, sizeof(httpBuf), 2);
+                            if (n > 0) {
+                                gotData = true;
+                                totalBytes += n;
+                                slimproto->updateStreamBytes(totalBytes);
+                                decoder->feed(httpBuf, static_cast<size_t>(n));
+                            } else if (n < 0 || !httpStream->isConnected()) {
+                                // Real error or EOF
+                                httpEof = true;
+                                decoder->setEof();
+                            }
+                            // n == 0: timeout, continue to drain decoder buffer
+                        } else {
+                            httpEof = true;
+                            decoder->setEof();
                         }
 
-                        totalBytes += n;
-                        slimproto->updateStreamBytes(totalBytes);
-
-                        // Feed encoded data to decoder
-                        decoder->feed(httpBuf, static_cast<size_t>(n));
-
-                        // Pull decoded frames
+                        // Pull decoded frames (from new data or decoder's internal buffer)
+                        bool decodedAny = false;
                         while (audioTestRunning.load(std::memory_order_relaxed)) {
                             size_t frames = decoder->readDecoded(decodeBuf, MAX_DECODE_FRAMES);
                             if (frames == 0) break;
+                            decodedAny = true;
 
                             // Open DirettaSync on first successful decode
                             if (!formatLogged && decoder->isFormatReady()) {
@@ -410,16 +425,12 @@ int main(int argc, char* argv[]) {
                                 LOG_INFO("[Audio] Decoding: " << fmt.sampleRate << " Hz, "
                                          << fmt.bitDepth << "-bit, " << fmt.channels << " ch");
 
-                                // Build AudioFormat for DirettaSync
-                                // Decoder always outputs S32_LE (MSB-aligned), so
-                                // tell DirettaSync the data is 32-bit regardless of source
                                 AudioFormat audioFmt;
                                 audioFmt.sampleRate = fmt.sampleRate;
                                 audioFmt.bitDepth = 32;
                                 audioFmt.channels = fmt.channels;
                                 audioFmt.isCompressed = (formatCode == 'f');  // FLAC
 
-                                // MSB-aligned hint in case sink only accepts 24-bit
                                 direttaPtr->setS24PackModeHint(
                                     DirettaRingBuffer::S24PackMode::MsbAligned);
 
@@ -430,7 +441,6 @@ int main(int argc, char* argv[]) {
                                     return;
                                 }
 
-                                // Tell LMS we're ready to play
                                 slimproto->sendStat(StatEvent::STMl);
                             }
 
@@ -444,7 +454,6 @@ int main(int argc, char* argv[]) {
                                         (decoded % fmt.sampleRate) * 1000 / fmt.sampleRate);
                                     slimproto->updateElapsed(elapsedSec, elapsedMs);
 
-                                    // Log elapsed every 10 seconds
                                     if (elapsedSec >= lastElapsedLog + 10) {
                                         lastElapsedLog = elapsedSec;
                                         uint32_t totalSec = fmt.totalSamples > 0
@@ -470,10 +479,14 @@ int main(int argc, char* argv[]) {
                                 break;
                             }
 
-                            // Push decoded frames to DirettaSync
                             direttaPtr->sendAudio(
                                 reinterpret_cast<const uint8_t*>(decodeBuf),
                                 frames);
+                        }
+
+                        // If no HTTP data and no decoded data, avoid busy-loop
+                        if (!gotData && !decodedAny && !httpEof) {
+                            std::this_thread::sleep_for(std::chrono::milliseconds(1));
                         }
 
                         if (decoder->hasError()) {

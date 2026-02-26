@@ -35,6 +35,10 @@ public:
     // Read audio data (blocking). Returns bytes read, 0 = EOF, -1 = error
     ssize_t read(uint8_t* buf, size_t maxLen);
 
+    // Read with timeout using poll(). Returns bytes read, 0 = timeout/no data, -1 = error
+    // Negative bytesRead with isConnected()=false means real error/EOF.
+    ssize_t readWithTimeout(uint8_t* buf, size_t maxLen, int timeoutMs);
+
     // HTTP response headers (available after connect)
     const std::string& getResponseHeaders() const { return m_responseHeaders; }
     int getHttpStatus() const { return m_httpStatus; }
