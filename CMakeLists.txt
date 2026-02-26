@@ -437,6 +437,11 @@ endif()
 # ============================================
 
 install(TARGETS slim2diretta DESTINATION bin)
+install(FILES slim2diretta@.service
+        DESTINATION lib/systemd/system)
+install(FILES slim2diretta.default
+        DESTINATION /etc/default
+        RENAME slim2diretta)
 
 # ============================================
 # Print Summary

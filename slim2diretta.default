@@ -1,0 +1,19 @@
+# /etc/default/slim2diretta
+# Configuration for slim2diretta systemd service
+#
+# Options are appended to the command line.
+# The target index is set by the service instance name:
+#   systemctl start slim2diretta@1    -> --target 1
+#   systemctl start slim2diretta@2    -> --target 2
+#
+# LMS server (omit for auto-discovery):
+#SLIM2DIRETTA_OPTS="-s 192.168.1.100"
+#
+# With player name:
+#SLIM2DIRETTA_OPTS="-s 192.168.1.100 -n Living Room"
+#
+# Verbose + player name + auto-discovery:
+#SLIM2DIRETTA_OPTS="-n Living Room -v"
+#
+# Default: auto-discover LMS, default player name
+SLIM2DIRETTA_OPTS=""
