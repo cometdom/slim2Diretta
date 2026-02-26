@@ -437,11 +437,11 @@ endif()
 # ============================================
 
 install(TARGETS slim2diretta DESTINATION bin)
-install(FILES ${CMAKE_SOURCE_DIR}/slim2diretta@.service
-        DESTINATION /etc/systemd/system)
-install(FILES ${CMAKE_SOURCE_DIR}/slim2diretta.default
-        DESTINATION /etc/default
-        RENAME slim2diretta)
+
+# Systemd service files: install manually with
+#   sudo cp slim2diretta@.service /etc/systemd/system/
+#   sudo cp slim2diretta.default /etc/default/slim2diretta
+#   sudo systemctl daemon-reload
 
 # ============================================
 # Print Summary
