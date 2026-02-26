@@ -411,17 +411,17 @@ int main(int argc, char* argv[]) {
                                          << fmt.bitDepth << "-bit, " << fmt.channels << " ch");
 
                                 // Build AudioFormat for DirettaSync
+                                // Decoder always outputs S32_LE (MSB-aligned), so
+                                // tell DirettaSync the data is 32-bit regardless of source
                                 AudioFormat audioFmt;
                                 audioFmt.sampleRate = fmt.sampleRate;
-                                audioFmt.bitDepth = fmt.bitDepth;
+                                audioFmt.bitDepth = 32;
                                 audioFmt.channels = fmt.channels;
                                 audioFmt.isCompressed = (formatCode == 'f');  // FLAC
 
-                                // MSB-aligned hint for 24-bit (decoder outputs sample << shift)
-                                if (fmt.bitDepth == 24) {
-                                    direttaPtr->setS24PackModeHint(
-                                        DirettaRingBuffer::S24PackMode::MsbAligned);
-                                }
+                                // MSB-aligned hint in case sink only accepts 24-bit
+                                direttaPtr->setS24PackModeHint(
+                                    DirettaRingBuffer::S24PackMode::MsbAligned);
 
                                 if (!direttaPtr->open(audioFmt)) {
                                     LOG_ERROR("[Audio] Failed to open Diretta output");
