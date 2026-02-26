@@ -456,17 +456,24 @@ int main(int argc, char* argv[]) {
                                 }
                             }
 
+                            // Flow control: wait when paused or buffer near full
+                            while (audioTestRunning.load(std::memory_order_acquire)) {
+                                if (direttaPtr->isPaused()) {
+                                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                                    continue;
+                                }
+                                if (direttaPtr->getBufferLevel() > 0.9f) {
+                                    std::unique_lock<std::mutex> lock(direttaPtr->getFlowMutex());
+                                    direttaPtr->waitForSpace(lock, std::chrono::milliseconds(50));
+                                    continue;
+                                }
+                                break;
+                            }
+
                             // Push decoded frames to DirettaSync
-                            // sendAudio expects raw S32_LE, numSamples = frame count
                             direttaPtr->sendAudio(
                                 reinterpret_cast<const uint8_t*>(decodeBuf),
                                 frames);
-
-                            // Flow control: pace decode when ring buffer is near full
-                            if (direttaPtr->getBufferLevel() > 0.9f) {
-                                std::unique_lock<std::mutex> lock(direttaPtr->getFlowMutex());
-                                direttaPtr->waitForSpace(lock, std::chrono::milliseconds(50));
-                            }
                         }
 
                         if (decoder->hasError()) {
@@ -483,14 +490,23 @@ int main(int argc, char* argv[]) {
                         if (frames == 0) break;
 
                         if (formatLogged) {
+                            // Flow control: wait when paused or buffer near full
+                            while (audioTestRunning.load(std::memory_order_acquire)) {
+                                if (direttaPtr->isPaused()) {
+                                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                                    continue;
+                                }
+                                if (direttaPtr->getBufferLevel() > 0.9f) {
+                                    std::unique_lock<std::mutex> lock(direttaPtr->getFlowMutex());
+                                    direttaPtr->waitForSpace(lock, std::chrono::milliseconds(50));
+                                    continue;
+                                }
+                                break;
+                            }
+
                             direttaPtr->sendAudio(
                                 reinterpret_cast<const uint8_t*>(decodeBuf),
                                 frames);
-
-                            if (direttaPtr->getBufferLevel() > 0.9f) {
-                                std::unique_lock<std::mutex> lock(direttaPtr->getFlowMutex());
-                                direttaPtr->waitForSpace(lock, std::chrono::milliseconds(50));
-                            }
                         }
 
                         // Update elapsed during drain
