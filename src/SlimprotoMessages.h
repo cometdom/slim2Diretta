@@ -28,6 +28,7 @@ constexpr uint16_t SLIMPROTO_HTTP_PORT = 9000;
 constexpr uint8_t DEVICE_ID_SQUEEZEBOX2 = 4;
 constexpr uint8_t DEVICE_ID_TRANSPORTER = 5;
 constexpr uint8_t DEVICE_ID_SQUEEZESLAVE = 8;
+constexpr uint8_t DEVICE_ID_SQUEEZEPLAY = 12;  // Required for capabilities parsing
 
 // strm sub-commands
 constexpr char STRM_START   = 's';
@@ -160,7 +161,7 @@ static_assert(sizeof(AudgCommand) == 18, "AudgCommand must be 18 bytes");
 
 // HELO payload layout (36 bytes fixed + variable capabilities)
 struct HeloPayload {
-    uint8_t deviceId;       // DEVICE_ID_SQUEEZESLAVE recommended
+    uint8_t deviceId;       // DEVICE_ID_SQUEEZEPLAY (12) for capabilities support
     uint8_t revision;       // firmware revision (0)
     uint8_t mac[6];         // MAC address
     uint8_t uuid[16];       // UUID (all zeros is fine)

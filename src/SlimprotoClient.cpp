@@ -357,7 +357,7 @@ void SlimprotoClient::sendHelo() {
     std::vector<uint8_t> payload(sizeof(HeloPayload) + caps.size());
 
     HeloPayload helo{};
-    helo.deviceId = DEVICE_ID_SQUEEZESLAVE;
+    helo.deviceId = DEVICE_ID_SQUEEZEPLAY;
     helo.revision = 0;
     std::memcpy(helo.mac, m_mac, 6);
     std::memset(helo.uuid, 0, 16);
@@ -547,22 +547,19 @@ bool SlimprotoClient::parseMac(const std::string& str) {
 std::string SlimprotoClient::buildCapabilities() const {
     std::ostringstream caps;
 
-    // Codecs
-    caps << "flc,pcm,aif";
+    // Codecs — LMS splits on commas and matches ^[a-z][a-z0-9]{1,4}$
+    caps << "flc,pcm,aif,wav";
     if (m_config.dsdEnabled) {
-        caps << ",dsd,dop";
+        caps << ",dsf,dff";  // DSD container formats recognized by LMS
     }
 
-    // Features
-    caps << "&MaxSampleRate=" << m_config.maxSampleRate;
-    caps << "&Model=slim2diretta";
-    caps << "&ModelName=slim2diretta";
-    caps << "&AccuratePlayPoints=1";
-    caps << "&HasDigitalOut=1";
-
-    if (m_config.dsdEnabled) {
-        caps << "&DSD=1";
-    }
+    // Features — also comma-separated key=value pairs
+    // LMS SqueezePlay::updateCapabilities() parses these via split(',')
+    caps << ",MaxSampleRate=" << m_config.maxSampleRate;
+    caps << ",Model=slim2diretta";
+    caps << ",ModelName=slim2diretta";
+    caps << ",AccuratePlayPoints=1";
+    caps << ",HasDigitalOut=1";
 
     return caps.str();
 }
