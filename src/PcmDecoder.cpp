@@ -162,6 +162,20 @@ bool PcmDecoder::parseWavHeader() {
             if (pos + 8 + chunkSize > m_headerBuf.size()) return false;  // Need more data
 
             uint16_t audioFormat = readLE16(p + pos + 8);
+            bool isExtensible = (audioFormat == 0xFFFE);
+
+            // WAVE_FORMAT_EXTENSIBLE: actual format in SubFormat GUID
+            if (isExtensible) {
+                if (chunkSize < 40) {
+                    LOG_ERROR("[PCM] EXTENSIBLE fmt chunk too small: " << chunkSize);
+                    m_state = State::ERROR;
+                    m_error = true;
+                    return false;
+                }
+                // SubFormat GUID first 2 bytes = actual format code
+                audioFormat = readLE16(p + pos + 8 + 24);
+            }
+
             if (audioFormat != 1 && audioFormat != 3) {  // 1=PCM, 3=IEEE float
                 LOG_ERROR("[PCM] Unsupported WAV format: " << audioFormat);
                 m_state = State::ERROR;
@@ -172,6 +186,15 @@ bool PcmDecoder::parseWavHeader() {
             m_format.channels = readLE16(p + pos + 10);
             m_format.sampleRate = readLE32(p + pos + 12);
             m_format.bitDepth = readLE16(p + pos + 22);
+
+            // EXTENSIBLE: wValidBitsPerSample may differ from container size
+            if (isExtensible) {
+                uint16_t validBits = readLE16(p + pos + 8 + 18);
+                if (validBits > 0) {
+                    m_format.bitDepth = validBits;
+                }
+            }
+
             m_bigEndian = false;
             foundFmt = true;
         }

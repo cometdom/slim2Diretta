@@ -472,9 +472,8 @@ int main(int argc, char* argv[]) {
                     while (audioTestRunning.load(std::memory_order_acquire) &&
                            (!httpEof || cacheFrames() > 0)) {
 
-                        // ========== PHASE 1: HTTP read + decode into cache ==========
-                        // Always read HTTP even when flow control is active.
-                        // This keeps the TCP pipeline flowing and the cache filled.
+                        // ========== PHASE 1a: HTTP read ==========
+                        // Read HTTP data and feed to decoder when cache has space.
                         bool gotData = false;
                         size_t cacheSamples = decodeCache.size() - decodeCachePos;
                         if (cacheSamples < DECODE_CACHE_MAX_SAMPLES && !httpEof) {
@@ -494,8 +493,13 @@ int main(int argc, char* argv[]) {
                                 httpEof = true;
                                 decoder->setEof();
                             }
+                        }
 
-                            // Drain all available decoded frames into cache
+                        // ========== PHASE 1b: Drain decoder into cache ==========
+                        // Always drain, even after httpEof — decoder may have
+                        // buffered data from previous feed() calls.
+                        if (decodeCache.size() - decodeCachePos <
+                            DECODE_CACHE_MAX_SAMPLES) {
                             while (true) {
                                 size_t frames = decoder->readDecoded(
                                     decodeBuf, MAX_DECODE_FRAMES);
