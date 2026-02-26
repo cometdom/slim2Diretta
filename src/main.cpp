@@ -294,40 +294,6 @@ int main(int argc, char* argv[]) {
 
     std::cout << "Diretta target #" << config.direttaTarget << " enabled" << std::endl;
 
-    // SDK warm-up: open at 48kHz (most common Qobuz rate), push silence
-    // to exercise the full data path (ring buffer -> worker -> network -> target),
-    // then stopPlayback to leave the connection alive.
-    //
-    // Why not close()? close() calls disconnect(true) but leaves m_sdkOpen=true,
-    // causing the next open()'s setSink to fail on the stale connection.
-    //
-    // With stopPlayback: connection stays alive, m_open=true, m_hasPreviousFormat=true.
-    // First real track at 48kHz -> quick resume (0 underruns).
-    // First real track at other rate -> format change path (proper close/reopen).
-    {
-        AudioFormat warmupFmt;
-        warmupFmt.sampleRate = 48000;
-        warmupFmt.bitDepth = 32;
-        warmupFmt.channels = 2;
-        warmupFmt.isCompressed = false;
-        diretta->setS24PackModeHint(DirettaRingBuffer::S24PackMode::MsbAligned);
-        if (diretta->open(warmupFmt)) {
-            // Push silence to fill prefill buffer and start data flow to target
-            constexpr size_t SILENCE_FRAMES = 1024;
-            int32_t silence[SILENCE_FRAMES * 2] = {};  // Zero-initialized
-            for (int i = 0; i < 12; i++) {  // ~12K frames = 250ms at 48kHz
-                diretta->sendAudio(
-                    reinterpret_cast<const uint8_t*>(silence), SILENCE_FRAMES);
-            }
-            // Let data flow to target to complete the full init path
-            std::this_thread::sleep_for(std::chrono::milliseconds(200));
-            diretta->stopPlayback(true);
-            LOG_INFO("SDK warm-up complete (48000/32/2, data path exercised)");
-        } else {
-            LOG_WARN("SDK warm-up open() failed — first track may have underruns");
-        }
-    }
-
     // Create Slimproto client and connect to LMS
     auto slimproto = std::make_unique<SlimprotoClient>();
     g_slimproto = slimproto.get();
