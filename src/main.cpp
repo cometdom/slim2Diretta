@@ -21,6 +21,7 @@
 #include <atomic>
 #include <iomanip>
 #include <cstring>
+#include <vector>
 
 #define SLIM2DIRETTA_VERSION "0.1.0"
 
@@ -382,6 +383,15 @@ int main(int argc, char* argv[]) {
                     bool formatLogged = false;
                     uint64_t lastElapsedLog = 0;
 
+                    // Pre-buffer: accumulate 500ms of decoded audio before
+                    // opening DirettaSync to prevent initial underruns
+                    constexpr unsigned int PREBUFFER_MS = 500;
+                    std::vector<int32_t> prebuffer;
+                    size_t prebufferFrames = 0;
+                    bool direttaOpened = false;
+                    AudioFormat audioFmt{};
+                    int detectedChannels = 2;
+
                     // Read HTTP -> feed decoder -> read decoded frames
                     // Uses readWithTimeout to avoid blocking on recv() which
                     // would starve the ring buffer during network waits.
@@ -417,7 +427,7 @@ int main(int argc, char* argv[]) {
                             if (frames == 0) break;
                             decodedAny = true;
 
-                            // Open DirettaSync on first successful decode
+                            // Detect format on first successful decode
                             if (!formatLogged && decoder->isFormatReady()) {
                                 formatLogged = true;
                                 auto fmt = decoder->getFormat();
@@ -425,23 +435,67 @@ int main(int argc, char* argv[]) {
                                 LOG_INFO("[Audio] Decoding: " << fmt.sampleRate << " Hz, "
                                          << fmt.bitDepth << "-bit, " << fmt.channels << " ch");
 
-                                AudioFormat audioFmt;
+                                detectedChannels = fmt.channels;
                                 audioFmt.sampleRate = fmt.sampleRate;
                                 audioFmt.bitDepth = 32;
                                 audioFmt.channels = fmt.channels;
-                                audioFmt.isCompressed = (formatCode == 'f');  // FLAC
+                                audioFmt.isCompressed = (formatCode == 'f');
 
-                                direttaPtr->setS24PackModeHint(
-                                    DirettaRingBuffer::S24PackMode::MsbAligned);
+                                // Reserve for pre-buffer
+                                size_t targetFrames = static_cast<size_t>(
+                                    fmt.sampleRate) * PREBUFFER_MS / 1000;
+                                prebuffer.reserve(targetFrames * fmt.channels);
+                            }
 
-                                if (!direttaPtr->open(audioFmt)) {
-                                    LOG_ERROR("[Audio] Failed to open Diretta output");
-                                    slimproto->sendStat(StatEvent::STMn);
-                                    audioThreadDone.store(true, std::memory_order_release);
-                                    return;
+                            // Pre-buffer phase: accumulate frames before opening
+                            if (formatLogged && !direttaOpened) {
+                                prebuffer.insert(prebuffer.end(), decodeBuf,
+                                                 decodeBuf + frames * detectedChannels);
+                                prebufferFrames += frames;
+
+                                auto fmt = decoder->getFormat();
+                                size_t targetFrames = static_cast<size_t>(
+                                    fmt.sampleRate) * PREBUFFER_MS / 1000;
+                                if (prebufferFrames >= targetFrames) {
+                                    // Open DirettaSync and flush pre-buffer
+                                    direttaPtr->setS24PackModeHint(
+                                        DirettaRingBuffer::S24PackMode::MsbAligned);
+                                    if (!direttaPtr->open(audioFmt)) {
+                                        LOG_ERROR("[Audio] Failed to open Diretta output");
+                                        slimproto->sendStat(StatEvent::STMn);
+                                        audioThreadDone.store(true, std::memory_order_release);
+                                        return;
+                                    }
+
+                                    uint32_t prebufMs = static_cast<uint32_t>(
+                                        prebufferFrames * 1000 / fmt.sampleRate);
+                                    LOG_INFO("[Audio] Pre-buffered " << prebufferFrames
+                                             << " frames (" << prebufMs << "ms)");
+
+                                    const int32_t* ptr = prebuffer.data();
+                                    size_t remaining = prebufferFrames;
+                                    while (remaining > 0 &&
+                                           audioTestRunning.load(std::memory_order_relaxed)) {
+                                        if (direttaPtr->getBufferLevel() > 0.95f) {
+                                            std::unique_lock<std::mutex> lock(
+                                                direttaPtr->getFlowMutex());
+                                            direttaPtr->waitForSpace(lock,
+                                                std::chrono::milliseconds(10));
+                                            continue;
+                                        }
+                                        size_t chunk = std::min(remaining, MAX_DECODE_FRAMES);
+                                        direttaPtr->sendAudio(
+                                            reinterpret_cast<const uint8_t*>(ptr), chunk);
+                                        ptr += chunk * detectedChannels;
+                                        remaining -= chunk;
+                                    }
+
+                                    prebuffer.clear();
+                                    prebuffer.shrink_to_fit();
+                                    direttaOpened = true;
+                                    slimproto->sendStat(StatEvent::STMl);
                                 }
-
-                                slimproto->sendStat(StatEvent::STMl);
+                                continue;  // Stay in prebuffer mode
                             }
 
                             // Update elapsed time for LMS progress bar
@@ -495,6 +549,34 @@ int main(int argc, char* argv[]) {
                         }
                     }
 
+                    // If stream ended during pre-buffer (short track), flush what we have
+                    if (formatLogged && !direttaOpened && prebufferFrames > 0 &&
+                        audioTestRunning.load(std::memory_order_acquire)) {
+                        direttaPtr->setS24PackModeHint(
+                            DirettaRingBuffer::S24PackMode::MsbAligned);
+                        if (direttaPtr->open(audioFmt)) {
+                            auto fmt = decoder->getFormat();
+                            uint32_t prebufMs = static_cast<uint32_t>(
+                                prebufferFrames * 1000 / fmt.sampleRate);
+                            LOG_INFO("[Audio] Short track pre-buffer: " << prebufferFrames
+                                     << " frames (" << prebufMs << "ms)");
+
+                            const int32_t* ptr = prebuffer.data();
+                            size_t remaining = prebufferFrames;
+                            while (remaining > 0) {
+                                size_t chunk = std::min(remaining, MAX_DECODE_FRAMES);
+                                direttaPtr->sendAudio(
+                                    reinterpret_cast<const uint8_t*>(ptr), chunk);
+                                ptr += chunk * detectedChannels;
+                                remaining -= chunk;
+                            }
+                            direttaOpened = true;
+                            slimproto->sendStat(StatEvent::STMl);
+                        }
+                        prebuffer.clear();
+                        prebuffer.shrink_to_fit();
+                    }
+
                     // Drain remaining decoded frames after HTTP stream ends
                     decoder->setEof();
                     while (!decoder->isFinished() && !decoder->hasError() &&
@@ -502,7 +584,7 @@ int main(int argc, char* argv[]) {
                         size_t frames = decoder->readDecoded(decodeBuf, MAX_DECODE_FRAMES);
                         if (frames == 0) break;
 
-                        if (formatLogged) {
+                        if (direttaOpened) {
                             // Flow control: wait when paused or buffer near full
                             while (audioTestRunning.load(std::memory_order_acquire)) {
                                 if (direttaPtr->isPaused()) {
