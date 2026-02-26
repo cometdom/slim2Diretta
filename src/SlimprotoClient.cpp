@@ -211,6 +211,11 @@ void SlimprotoClient::processServerMessage(const char opcode[4], const uint8_t* 
         // Audio enable - just acknowledge
         LOG_DEBUG("[Slimproto] aude received (audio enable)");
     }
+    else if (std::memcmp(opcode, "vfdc", 4) == 0 ||
+             std::memcmp(opcode, "grfe", 4) == 0 ||
+             std::memcmp(opcode, "grfb", 4) == 0) {
+        // Visualization/display commands - silently ignore (no screen)
+    }
     else {
         // Unknown command - log and skip
         std::string cmd(opcode, 4);
