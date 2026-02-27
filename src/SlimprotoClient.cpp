@@ -103,6 +103,9 @@ bool SlimprotoClient::connect(const std::string& server, uint16_t port, const Co
     // Send HELO to register as a player
     sendHelo();
 
+    // Send player name to LMS (setd id=0)
+    sendSetd(0, m_config.playerName);
+
     return true;
 }
 
@@ -334,13 +337,15 @@ void SlimprotoClient::handleSetd(const uint8_t* data, size_t len) {
 
     uint8_t id = data[0];
     if (id == 0 && len > 1) {
-        // Player name
+        // LMS sets player name
         std::string name(reinterpret_cast<const char*>(data + 1), len - 1);
-        // Remove trailing null if present
         while (!name.empty() && name.back() == '\0') {
             name.pop_back();
         }
         LOG_INFO("[Slimproto] Player name set to: " << name);
+    } else if (id == 0 && len == 1) {
+        // LMS queries player name — respond with configured name
+        sendSetd(0, m_config.playerName);
     } else {
         LOG_DEBUG("[Slimproto] setd id=" << static_cast<int>(id) << " (" << len - 1 << " bytes)");
     }
@@ -383,6 +388,21 @@ void SlimprotoClient::sendBye() {
     uint8_t reason = 0;  // Normal disconnect
     sendMessage("BYE!", &reason, 1);
     LOG_DEBUG("[Slimproto] BYE sent");
+}
+
+// ============================================
+// Send setd (device setting to server)
+// ============================================
+
+void SlimprotoClient::sendSetd(uint8_t id, const std::string& data) {
+    std::vector<uint8_t> payload(1 + data.size());
+    payload[0] = id;
+    if (!data.empty()) {
+        std::memcpy(payload.data() + 1, data.c_str(), data.size());
+    }
+    sendMessage("setd", payload.data(), payload.size());
+    LOG_DEBUG("[Slimproto] setd sent: id=" << static_cast<int>(id)
+             << " data=\"" << data << "\"");
 }
 
 // ============================================

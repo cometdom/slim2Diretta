@@ -92,6 +92,7 @@ private:
     // Internal protocol methods
     void sendHelo();
     void sendBye();
+    void sendSetd(uint8_t id, const std::string& data);
 
     // Server message handlers
     void processServerMessage(const char opcode[4], const uint8_t* data, size_t len);
