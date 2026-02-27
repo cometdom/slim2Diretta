@@ -474,6 +474,7 @@ int main(int argc, char* argv[]) {
                     size_t decodeCachePos = 0;  // Read position (samples consumed)
 
                     constexpr unsigned int PREBUFFER_MS = 500;
+                    uint64_t pushedFrames = 0;  // Frames actually sent to DirettaSync
                     bool direttaOpened = false;
                     AudioFormat audioFmt{};
                     int detectedChannels = 2;
@@ -573,6 +574,7 @@ int main(int argc, char* argv[]) {
                                     remaining -= chunk;
                                 }
                                 decodeCachePos += prebufFrames * detectedChannels;
+                                pushedFrames += prebufFrames;
                                 direttaOpened = true;
                                 slimproto->sendStat(StatEvent::STMl);
                             }
@@ -592,6 +594,7 @@ int main(int argc, char* argv[]) {
                                         decodeCache.data() + decodeCachePos),
                                     push);
                                 decodeCachePos += push * detectedChannels;
+                                pushedFrames += push;
                             } else {
                                 // Buffer full - sleep briefly, then loop back
                                 // to read more HTTP (keeps TCP pipeline flowing)
@@ -604,8 +607,7 @@ int main(int argc, char* argv[]) {
                         if (direttaOpened && decoder->isFormatReady()) {
                             auto fmt = decoder->getFormat();
                             if (fmt.sampleRate > 0) {
-                                uint64_t decoded = decoder->getDecodedSamples();
-                                uint64_t totalMs = decoded * 1000 / fmt.sampleRate;
+                                uint64_t totalMs = pushedFrames * 1000 / fmt.sampleRate;
                                 uint32_t elapsedSec = static_cast<uint32_t>(totalMs / 1000);
                                 uint32_t elapsedMs = static_cast<uint32_t>(totalMs);
                                 slimproto->updateElapsed(elapsedSec, elapsedMs);
@@ -618,7 +620,7 @@ int main(int argc, char* argv[]) {
                                     LOG_DEBUG("[Audio] Elapsed: " << elapsedSec << "s"
                                         << (totalSec > 0
                                             ? " / " + std::to_string(totalSec) + "s" : "")
-                                        << " (" << decoded << " frames)"
+                                        << " (" << pushedFrames << " pushed)"
                                         << " cache=" << cacheFrames() << "f");
                                 }
                             }
@@ -678,13 +680,13 @@ int main(int argc, char* argv[]) {
                                 decodeCache.data() + decodeCachePos),
                             push);
                         decodeCachePos += push * detectedChannels;
+                        pushedFrames += push;
 
                         // Update elapsed during drain
                         if (decoder->isFormatReady()) {
                             auto fmt = decoder->getFormat();
                             if (fmt.sampleRate > 0) {
-                                uint64_t decoded = decoder->getDecodedSamples();
-                                uint64_t totalMs = decoded * 1000 / fmt.sampleRate;
+                                uint64_t totalMs = pushedFrames * 1000 / fmt.sampleRate;
                                 uint32_t elapsedSec = static_cast<uint32_t>(totalMs / 1000);
                                 uint32_t elapsedMs = static_cast<uint32_t>(totalMs);
                                 slimproto->updateElapsed(elapsedSec, elapsedMs);
