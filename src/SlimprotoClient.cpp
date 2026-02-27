@@ -400,7 +400,7 @@ void SlimprotoClient::sendSetd(uint8_t id, const std::string& data) {
     if (!data.empty()) {
         std::memcpy(payload.data() + 1, data.c_str(), data.size());
     }
-    sendMessage("setd", payload.data(), payload.size());
+    sendMessage("SETD", payload.data(), payload.size());
     LOG_DEBUG("[Slimproto] setd sent: id=" << static_cast<int>(id)
              << " data=\"" << data << "\"");
 }
