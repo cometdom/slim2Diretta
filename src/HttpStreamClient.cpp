@@ -29,6 +29,8 @@ bool HttpStreamClient::connect(const std::string& serverIp, uint16_t serverPort,
     m_responseHeaders.clear();
     m_httpStatus = 0;
     m_bytesReceived = 0;
+    m_icyMetaInt = 0;
+    m_icyBytesUntilMeta = 0;
 
     // Create TCP socket
     m_socket = socket(AF_INET, SOCK_STREAM, 0);
@@ -104,20 +106,82 @@ bool HttpStreamClient::isConnected() const {
     return m_connected.load(std::memory_order_acquire);
 }
 
-ssize_t HttpStreamClient::read(uint8_t* buf, size_t maxLen) {
+ssize_t HttpStreamClient::readRaw(uint8_t* buf, size_t maxLen) {
     if (m_socket < 0) return -1;
 
     ssize_t n = recv(m_socket, buf, maxLen, 0);
     if (n > 0) {
-        m_bytesReceived += static_cast<uint64_t>(n);
+        return n;
     } else if (n == 0) {
-        // EOF - server closed connection (end of stream)
         m_connected.store(false, std::memory_order_release);
+        return 0;
     } else {
-        if (errno == EINTR) return 0;  // Interrupted, caller should retry
+        if (errno == EINTR) return 0;
         LOG_ERROR("[HTTP] Read error: " << strerror(errno));
         m_connected.store(false, std::memory_order_release);
         return -1;
+    }
+}
+
+bool HttpStreamClient::skipIcyMetadata() {
+    // Read 1 byte: metadata length * 16
+    uint8_t lenByte = 0;
+    while (true) {
+        ssize_t n = recv(m_socket, &lenByte, 1, 0);
+        if (n == 1) break;
+        if (n == 0) {
+            m_connected.store(false, std::memory_order_release);
+            return false;
+        }
+        if (errno != EINTR) {
+            m_connected.store(false, std::memory_order_release);
+            return false;
+        }
+    }
+
+    size_t metaLen = static_cast<size_t>(lenByte) * 16;
+    if (metaLen == 0) return true;  // No metadata this time
+
+    // Read and discard metadata bytes
+    uint8_t discardBuf[256];
+    size_t remaining = metaLen;
+    while (remaining > 0) {
+        size_t toRead = std::min(remaining, sizeof(discardBuf));
+        ssize_t n = recv(m_socket, discardBuf, toRead, 0);
+        if (n <= 0) {
+            if (n < 0 && errno == EINTR) continue;
+            m_connected.store(false, std::memory_order_release);
+            return false;
+        }
+        remaining -= static_cast<size_t>(n);
+    }
+
+    return true;
+}
+
+ssize_t HttpStreamClient::read(uint8_t* buf, size_t maxLen) {
+    if (m_socket < 0) return -1;
+
+    // No ICY metadata — simple passthrough
+    if (m_icyMetaInt == 0) {
+        ssize_t n = readRaw(buf, maxLen);
+        if (n > 0) m_bytesReceived += static_cast<uint64_t>(n);
+        return n;
+    }
+
+    // ICY metadata active — limit read to bytes before next metadata block
+    size_t canRead = std::min(maxLen, static_cast<size_t>(m_icyBytesUntilMeta));
+    if (canRead == 0) {
+        // At metadata boundary — skip metadata block
+        if (!skipIcyMetadata()) return -1;
+        m_icyBytesUntilMeta = m_icyMetaInt;
+        canRead = std::min(maxLen, static_cast<size_t>(m_icyBytesUntilMeta));
+    }
+
+    ssize_t n = readRaw(buf, canRead);
+    if (n > 0) {
+        m_bytesReceived += static_cast<uint64_t>(n);
+        m_icyBytesUntilMeta -= static_cast<uint32_t>(n);
     }
     return n;
 }
@@ -211,6 +275,27 @@ bool HttpStreamClient::parseResponseHeaders() {
 
     if (m_httpStatus != 200) {
         LOG_WARN("[HTTP] Unexpected status: " << m_httpStatus);
+    }
+
+    // Parse icy-metaint header (case-insensitive)
+    // Format: "icy-metaint:16000\r\n" or "icy-metaint: 16000\r\n"
+    std::string lowerHeaders = headerBuf;
+    std::transform(lowerHeaders.begin(), lowerHeaders.end(), lowerHeaders.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
+
+    size_t icyPos = lowerHeaders.find("icy-metaint:");
+    if (icyPos != std::string::npos) {
+        size_t valStart = icyPos + 12;  // strlen("icy-metaint:")
+        // Skip optional whitespace
+        while (valStart < lowerHeaders.size() && lowerHeaders[valStart] == ' ') {
+            valStart++;
+        }
+        uint32_t metaInt = static_cast<uint32_t>(std::atoi(headerBuf.c_str() + valStart));
+        if (metaInt > 0) {
+            m_icyMetaInt = metaInt;
+            m_icyBytesUntilMeta = metaInt;
+            LOG_INFO("[HTTP] ICY metadata interval: " << metaInt << " bytes");
+        }
     }
 
     return true;

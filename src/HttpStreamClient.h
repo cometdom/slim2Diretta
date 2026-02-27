@@ -46,6 +46,9 @@ public:
     // Total bytes received (audio data only, after headers)
     uint64_t getBytesReceived() const { return m_bytesReceived; }
 
+    // ICY metadata interval (0 = no ICY metadata in stream)
+    uint32_t getIcyMetaInt() const { return m_icyMetaInt; }
+
 private:
     int m_socket = -1;
     std::atomic<bool> m_connected{false};
@@ -53,6 +56,15 @@ private:
     std::string m_responseHeaders;
     int m_httpStatus = 0;
     uint64_t m_bytesReceived = 0;
+
+    // ICY metadata handling
+    uint32_t m_icyMetaInt = 0;        // Metadata interval (bytes), 0 = disabled
+    uint32_t m_icyBytesUntilMeta = 0; // Countdown to next metadata block
+
+    // Low-level recv (no ICY handling)
+    ssize_t readRaw(uint8_t* buf, size_t maxLen);
+    // Read and discard ICY metadata block at current position
+    bool skipIcyMetadata();
 
     bool sendAll(const void* buf, size_t len);
     bool parseResponseHeaders();
