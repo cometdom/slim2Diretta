@@ -429,8 +429,10 @@ bool DirettaSync::open(const AudioFormat& format) {
             std::cout << "[DirettaSync] Same format - quick resume (no setSink)" << std::endl;
 
             // Send silence before transition to flush Diretta pipeline
-            if (m_isDsdMode.load(std::memory_order_acquire)) {
-                requestShutdownSilence(30);
+            // Both DSD and PCM need this for a clean gap between tracks
+            {
+                int silenceCount = m_isDsdMode.load(std::memory_order_acquire) ? 30 : 10;
+                requestShutdownSilence(silenceCount);
                 auto start = std::chrono::steady_clock::now();
                 while (m_silenceBuffersRemaining.load(std::memory_order_acquire) > 0) {
                     if (std::chrono::steady_clock::now() - start > std::chrono::milliseconds(100)) break;
@@ -438,13 +440,18 @@ bool DirettaSync::open(const AudioFormat& format) {
                 }
             }
 
-            // Clear buffer and reset flags
+            // Clear buffer and reset flags under ReconfigureGuard
+            // CRITICAL: Without ReconfigureGuard, clear() races with the worker
+            // thread's pop() — the worker can overwrite the reset read position,
+            // causing it to read stale data from the previous track.
             // NOTE: Do NOT reset m_postOnlineDelayDone for quick resume!
-            // The DAC is already stable from the previous track - no need
-            // to send additional silence after prefill completes.
-            m_ringBuffer.clear();
-            m_prefillComplete = false;
-            m_rebuffering.store(false, std::memory_order_relaxed);
+            // The DAC is already stable from the previous track.
+            {
+                ReconfigureGuard guard(*this);
+                m_ringBuffer.clear();
+                m_prefillComplete = false;
+                m_rebuffering.store(false, std::memory_order_relaxed);
+            }
             // m_postOnlineDelayDone stays true - DAC already stable
             m_stabilizationCount = 0;
             m_stopRequested = false;
