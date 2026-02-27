@@ -525,6 +525,12 @@ int main(int argc, char* argv[]) {
                             // === PHASE 3: Prebuffer (wait for enough raw data) ===
                             if (formatLogged && !direttaOpened) {
                                 size_t targetBytes = static_cast<size_t>(byteRateTotal * PREBUFFER_MS / 1000);
+                                // Cap to achievable level: high DSD rates (DSD256/512)
+                                // need more than DSD_BUF_MAX for 500ms, but flow control
+                                // prevents the internal buffer from growing beyond DSD_BUF_MAX.
+                                if (targetBytes > DSD_BUF_MAX * 3 / 4) {
+                                    targetBytes = DSD_BUF_MAX * 3 / 4;
+                                }
 
                                 if (dsdReader->availableBytes() >= targetBytes || httpEof) {
                                     if (dsdReader->availableBytes() == 0) continue;
@@ -758,14 +764,17 @@ int main(int argc, char* argv[]) {
                                 size_t prebufFrames = cacheFrames();
                                 if (prebufFrames == 0) continue;
 
-                                direttaPtr->setS24PackModeHint(
-                                    DirettaRingBuffer::S24PackMode::MsbAligned);
                                 if (!direttaPtr->open(audioFmt)) {
                                     LOG_ERROR("[Audio] Failed to open Diretta output");
                                     slimproto->sendStat(StatEvent::STMn);
                                     audioThreadDone.store(true, std::memory_order_release);
                                     return;
                                 }
+                                // Set S24 pack mode hint AFTER open() — open() calls
+                                // clear() which resets the hint. Our decoders always
+                                // output MSB-aligned int32_t samples.
+                                direttaPtr->setS24PackModeHint(
+                                    DirettaRingBuffer::S24PackMode::MsbAligned);
 
                                 uint32_t prebufMs = static_cast<uint32_t>(
                                     prebufFrames * 1000 / fmt.sampleRate);
