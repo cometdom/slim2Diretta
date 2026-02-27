@@ -810,6 +810,24 @@ int main(int argc, char* argv[]) {
                                 if (!dopDetected && cacheFrames() >= 32) {
                                     const int32_t* samples =
                                         decodeCache.data() + decodeCachePos;
+                                    // Debug: dump first 8 marker bytes
+                                    {
+                                        std::ostringstream oss;
+                                        oss << "[Audio] DoP probe markers:";
+                                        size_t n = std::min(cacheFrames(),
+                                                            size_t(8));
+                                        for (size_t k = 0; k < n; k++) {
+                                            uint8_t m = static_cast<uint8_t>(
+                                                (samples[k * detectedChannels]
+                                                 >> 24) & 0xFF);
+                                            oss << " 0x" << std::hex
+                                                << std::setfill('0')
+                                                << std::setw(2)
+                                                << static_cast<int>(m);
+                                        }
+                                        oss << std::dec;
+                                        LOG_DEBUG(oss.str());
+                                    }
                                     if (detectDoP(samples, cacheFrames(),
                                                   detectedChannels)) {
                                         dopDetected = true;
