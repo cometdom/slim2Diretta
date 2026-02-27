@@ -31,7 +31,7 @@
 #include <unistd.h>
 #include <poll.h>
 
-#define SLIM2DIRETTA_VERSION "0.1.0"
+#define SLIM2DIRETTA_VERSION "0.2.0"
 
 // ============================================
 // Async Logging Infrastructure
@@ -793,7 +793,10 @@ int main(int argc, char* argv[]) {
                             audioFmt.sampleRate = fmt.sampleRate;
                             audioFmt.bitDepth = 32;
                             audioFmt.channels = fmt.channels;
-                            audioFmt.isCompressed = (formatCode == 'f');
+                            audioFmt.isCompressed = (formatCode == FORMAT_FLAC ||
+                                                     formatCode == FORMAT_MP3 ||
+                                                     formatCode == FORMAT_OGG ||
+                                                     formatCode == FORMAT_AAC);
                         }
 
                         // ========== PHASE 3: Prebuffer phase ==========

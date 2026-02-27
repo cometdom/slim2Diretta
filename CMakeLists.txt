@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.10)
-project(slim2diretta VERSION 0.1.0)
+project(slim2diretta VERSION 0.2.0)
 
 set(CMAKE_CXX_STANDARD 17)
 
@@ -296,23 +296,125 @@ if(NOT FLAC_FOUND)
 endif()
 
 # ============================================
+# Optional Codec: MP3 (libmpg123)
+# ============================================
+option(ENABLE_MP3 "Enable MP3 decoding via libmpg123" ON)
+if(ENABLE_MP3)
+    if(PKG_CONFIG_FOUND)
+        pkg_check_modules(MPG123 libmpg123)
+    endif()
+    if(NOT MPG123_FOUND)
+        find_library(MPG123_LIB NAMES mpg123)
+        find_path(MPG123_INC NAMES mpg123.h)
+        if(MPG123_LIB AND MPG123_INC)
+            set(MPG123_LIBRARIES ${MPG123_LIB})
+            set(MPG123_INCLUDE_DIRS ${MPG123_INC})
+            set(MPG123_FOUND TRUE)
+        endif()
+    endif()
+    if(MPG123_FOUND)
+        message(STATUS "MP3 support: ENABLED (libmpg123)")
+        add_definitions(-DENABLE_MP3)
+    else()
+        message(STATUS "MP3 support: DISABLED (libmpg123-dev not found)")
+        set(ENABLE_MP3 OFF)
+    endif()
+endif()
+
+# ============================================
+# Optional Codec: Ogg Vorbis (libvorbisfile)
+# ============================================
+option(ENABLE_OGG "Enable Ogg Vorbis decoding via libvorbisfile" ON)
+if(ENABLE_OGG)
+    if(PKG_CONFIG_FOUND)
+        pkg_check_modules(VORBISFILE vorbisfile)
+    endif()
+    if(NOT VORBISFILE_FOUND)
+        find_library(VORBISFILE_LIB NAMES vorbisfile)
+        find_library(VORBIS_LIB NAMES vorbis)
+        find_library(OGG_LIB NAMES ogg)
+        find_path(VORBIS_INC NAMES vorbis/vorbisfile.h)
+        if(VORBISFILE_LIB AND VORBIS_LIB AND OGG_LIB AND VORBIS_INC)
+            set(VORBISFILE_LIBRARIES ${VORBISFILE_LIB} ${VORBIS_LIB} ${OGG_LIB})
+            set(VORBISFILE_INCLUDE_DIRS ${VORBIS_INC})
+            set(VORBISFILE_FOUND TRUE)
+        endif()
+    endif()
+    if(VORBISFILE_FOUND)
+        message(STATUS "Ogg Vorbis support: ENABLED (libvorbisfile)")
+        add_definitions(-DENABLE_OGG)
+    else()
+        message(STATUS "Ogg Vorbis support: DISABLED (libvorbis-dev not found)")
+        set(ENABLE_OGG OFF)
+    endif()
+endif()
+
+# ============================================
+# Optional Codec: AAC (fdk-aac)
+# ============================================
+option(ENABLE_AAC "Enable AAC decoding via fdk-aac" ON)
+if(ENABLE_AAC)
+    if(PKG_CONFIG_FOUND)
+        pkg_check_modules(FDKAAC fdk-aac)
+    endif()
+    if(NOT FDKAAC_FOUND)
+        find_library(FDKAAC_LIB NAMES fdk-aac)
+        find_path(FDKAAC_INC NAMES fdk-aac/aacdecoder_lib.h)
+        if(FDKAAC_LIB AND FDKAAC_INC)
+            set(FDKAAC_LIBRARIES ${FDKAAC_LIB})
+            set(FDKAAC_INCLUDE_DIRS ${FDKAAC_INC})
+            set(FDKAAC_FOUND TRUE)
+        endif()
+    endif()
+    if(FDKAAC_FOUND)
+        message(STATUS "AAC support: ENABLED (fdk-aac)")
+        add_definitions(-DENABLE_AAC)
+    else()
+        message(STATUS "AAC support: DISABLED (libfdk-aac-dev not found)")
+        set(ENABLE_AAC OFF)
+    endif()
+endif()
+
+# ============================================
 # Include Directories
 # ============================================
+
+set(EXTRA_INCLUDE_DIRS ${FLAC_INCLUDE_DIRS})
+if(ENABLE_MP3)
+    list(APPEND EXTRA_INCLUDE_DIRS ${MPG123_INCLUDE_DIRS})
+endif()
+if(ENABLE_OGG)
+    list(APPEND EXTRA_INCLUDE_DIRS ${VORBISFILE_INCLUDE_DIRS})
+endif()
+if(ENABLE_AAC)
+    list(APPEND EXTRA_INCLUDE_DIRS ${FDKAAC_INCLUDE_DIRS})
+endif()
 
 include_directories(
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/diretta
     ${SDK_PATH}/Host
-    ${FLAC_INCLUDE_DIRS}
+    ${EXTRA_INCLUDE_DIRS}
 )
 
 # ============================================
 # Link Directories
 # ============================================
 
+set(EXTRA_LINK_DIRS ${FLAC_LIBRARY_DIRS})
+if(ENABLE_MP3)
+    list(APPEND EXTRA_LINK_DIRS ${MPG123_LIBRARY_DIRS})
+endif()
+if(ENABLE_OGG)
+    list(APPEND EXTRA_LINK_DIRS ${VORBISFILE_LIBRARY_DIRS})
+endif()
+if(ENABLE_AAC)
+    list(APPEND EXTRA_LINK_DIRS ${FDKAAC_LIBRARY_DIRS})
+endif()
+
 link_directories(
     ${SDK_PATH}/lib
-    ${FLAC_LIBRARY_DIRS}
+    ${EXTRA_LINK_DIRS}
 )
 
 # ============================================
@@ -332,6 +434,17 @@ set(SLIM2DIRETTA_SOURCES
     diretta/globals.cpp
 )
 
+# Conditionally add codec sources
+if(ENABLE_MP3)
+    list(APPEND SLIM2DIRETTA_SOURCES src/Mp3Decoder.cpp)
+endif()
+if(ENABLE_OGG)
+    list(APPEND SLIM2DIRETTA_SOURCES src/OggDecoder.cpp)
+endif()
+if(ENABLE_AAC)
+    list(APPEND SLIM2DIRETTA_SOURCES src/AacDecoder.cpp)
+endif()
+
 # ============================================
 # Create Executable
 # ============================================
@@ -350,6 +463,16 @@ target_link_libraries(slim2diretta
     ${FLAC_LIBRARIES}
     dl
 )
+
+if(ENABLE_MP3)
+    target_link_libraries(slim2diretta ${MPG123_LIBRARIES})
+endif()
+if(ENABLE_OGG)
+    target_link_libraries(slim2diretta ${VORBISFILE_LIBRARIES})
+endif()
+if(ENABLE_AAC)
+    target_link_libraries(slim2diretta ${FDKAAC_LIBRARIES})
+endif()
 
 # Link ACQUA if available
 if(EXISTS "${SDK_LIB_ACQUA}")
@@ -465,6 +588,25 @@ message(STATUS "SDK:")
 message(STATUS "  Path:           ${SDK_PATH}")
 message(STATUS "  Diretta Lib:    ${SDK_LIB_DIRETTA}")
 message(STATUS "  ACQUA Lib:      ${SDK_LIB_ACQUA}")
+message(STATUS "")
+message(STATUS "Codecs:")
+message(STATUS "  FLAC:           ENABLED (always)")
+message(STATUS "  PCM:            ENABLED (always)")
+if(ENABLE_MP3)
+    message(STATUS "  MP3:            ENABLED (libmpg123)")
+else()
+    message(STATUS "  MP3:            DISABLED")
+endif()
+if(ENABLE_OGG)
+    message(STATUS "  Ogg Vorbis:     ENABLED (libvorbisfile)")
+else()
+    message(STATUS "  Ogg Vorbis:     DISABLED")
+endif()
+if(ENABLE_AAC)
+    message(STATUS "  AAC:            ENABLED (fdk-aac)")
+else()
+    message(STATUS "  AAC:            DISABLED")
+endif()
 message(STATUS "")
 message(STATUS "Dependencies:")
 message(STATUS "  libFLAC:        ${FLAC_LIBRARIES}")

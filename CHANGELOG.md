@@ -2,6 +2,47 @@
 
 All notable changes to slim2diretta are documented in this file.
 
+## v0.2.0 - Test Version (2026-02-27)
+
+### Added
+
+- **MP3 decoding** via libmpg123 (LGPL-2.1)
+  - Full streaming support for internet radio
+  - Automatic ID3v2 tag handling
+  - Error recovery with auto-resync (robust for radio streams)
+
+- **Ogg Vorbis decoding** via libvorbisfile (BSD-3-Clause)
+  - Streaming with custom non-seekable callbacks
+  - Chained stream support (format changes between tracks)
+  - OV_HOLE gap handling (normal for radio streams)
+
+- **AAC decoding** via fdk-aac (BSD-like license)
+  - ADTS transport for internet radio streams
+  - HE-AAC v2 support (SBR + Parametric Stereo)
+  - Automatic sample rate detection (handles SBR upsampling)
+  - Transport sync error recovery
+
+- **Optional codec system**: All new codecs are compile-time optional via CMake
+  - `ENABLE_MP3=ON/OFF` (default: ON, auto-disabled if libmpg123 not found)
+  - `ENABLE_OGG=ON/OFF` (default: ON, auto-disabled if libvorbis not found)
+  - `ENABLE_AAC=ON/OFF` (default: ON, auto-disabled if fdk-aac not found)
+
+- **LMS capabilities**: Player now advertises mp3, ogg, aac support to LMS
+  - LMS sends native format streams instead of transcoding
+  - Internet radio stations play directly
+
+### Build Dependencies
+
+New optional dependencies (install for full codec support):
+
+| Distribution | Command |
+|-------------|---------|
+| **Fedora** | `sudo dnf install mpg123-devel libvorbis-devel fdk-aac-free-devel` |
+| **Ubuntu/Debian** | `sudo apt install libmpg123-dev libvorbis-dev libfdk-aac-dev` |
+| **Arch** | `sudo pacman -S mpg123 libvorbis libfdk-aac` |
+
+---
+
 ## v0.1.0 - Test Version (2026-02-27)
 
 Initial test release for validation by beta testers.
@@ -36,7 +77,7 @@ Initial test release for validation by beta testers.
   - Pause/unpause with silence injection for clean transitions
   - SIGUSR1 runtime statistics dump
 
-### Known Limitations
+### Known Limitations (v0.1.0)
 
 - Linux only (requires root for RT threads)
 - No MP3, AAC, OGG, ALAC support (FLAC and PCM/DSD only)

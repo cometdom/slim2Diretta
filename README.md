@@ -1,4 +1,4 @@
-# slim2diretta v0.1.0 (Test Version)
+# slim2diretta v0.2.0 (Test Version)
 
 **Native LMS Player with Diretta Output - Mono-Process Architecture**
 
@@ -8,7 +8,7 @@
 
 ---
 
-![Version](https://img.shields.io/badge/version-0.1.0_test-blue.svg)
+![Version](https://img.shields.io/badge/version-0.2.0_test-blue.svg)
 ![DSD](https://img.shields.io/badge/DSD-Native-green.svg)
 ![SDK](https://img.shields.io/badge/SDK-DIRETTA::Sync-orange.svg)
 
@@ -43,7 +43,7 @@ This tool uses the **Diretta Host SDK**, which is proprietary software by Yu Har
 A standalone player that:
 1. Implements the **Slimproto protocol** natively (clean-room, no GPL code)
 2. Connects directly to **LMS** or **Roon** (Squeezebox mode) as a player
-3. Decodes **FLAC**, **PCM/WAV/AIFF**, and **DSD** (DSF/DFF/DoP)
+3. Decodes **FLAC**, **MP3**, **AAC**, **Ogg Vorbis**, **PCM/WAV/AIFF**, and **DSD** (DSF/DFF/DoP)
 4. Streams audio to a **Diretta Target** using DirettaSync v2.0
 
 ### Why Use This Instead of squeeze2diretta?
@@ -52,7 +52,7 @@ A standalone player that:
 |---|---|---|
 | **Architecture** | Wrapper (Squeezelite + pipe) | Mono-process (single binary) |
 | **Slimproto** | Delegated to Squeezelite | Native implementation |
-| **Dependencies** | Squeezelite + many audio libs | Only libFLAC |
+| **Dependencies** | Squeezelite + many audio libs | libFLAC + optional codecs |
 | **Format changes** | In-band headers via pipe | Direct internal signaling |
 | **Roon DSD** | DoP via Squeezelite `-D dop` | Automatic DoP detection |
 | **Complexity** | Two processes + patch | Single process, no patch |
@@ -96,6 +96,9 @@ Both tools share the same **DirettaSync v2.0** engine for Diretta output.
 |  +--------+---------+                      |                |
 |  | Decoder           |                     |                |
 |  | - FLAC (libFLAC)  +--------------------+                |
+|  | - MP3 (libmpg123) |                                     |
+|  | - AAC (fdk-aac)   |                                     |
+|  | - OGG (libvorbis) |                                     |
 |  | - PCM/WAV/AIFF    |                                     |
 |  | - DSD (DSF/DFF)   |                                     |
 |  | - DoP detection   |                                     |
@@ -122,6 +125,9 @@ Both tools share the same **DirettaSync v2.0** engine for Diretta output.
 
 ### Audio Formats
 - **FLAC**: Lossless decoding via libFLAC (all bit depths)
+- **MP3**: Decoding via libmpg123 (internet radio, streaming)
+- **AAC**: Decoding via fdk-aac with HE-AAC v2 / SBR / PS support (internet radio)
+- **Ogg Vorbis**: Decoding via libvorbisfile (internet radio, streaming)
 - **PCM**: WAV, AIFF containers + raw PCM (Roon)
 - **Native DSD**: DSF (LSB-first) and DFF/DSDIFF (MSB-first)
 - **DSD rates**: DSD64, DSD128, DSD256, DSD512
@@ -178,7 +184,9 @@ Both tools share the same **DirettaSync v2.0** engine for Diretta output.
 - **OS**: Linux with kernel 4.x+
 - **Diretta Host SDK**: Version 148 or 147 ([download here](https://www.diretta.link/hostsdk.html))
 - **LMS**: Lyrion Music Server 7.x+ running on your network (or Roon with Squeezebox mode)
-- **Build tools**: gcc/g++ 7.0+, make, CMake 3.10+, libFLAC-dev
+- **Build tools**: gcc/g++ 7.0+, make, CMake 3.10+
+- **Required library**: libFLAC
+- **Optional libraries** (for internet radio): libmpg123 (MP3), libvorbis (Ogg), fdk-aac (AAC)
 
 ---
 
@@ -248,18 +256,29 @@ The installer provides an interactive menu with options for:
 
 **Fedora:**
 ```bash
+# Required
 sudo dnf install -y gcc-c++ make cmake pkg-config flac-devel
+# Optional codecs (recommended for internet radio)
+sudo dnf install -y mpg123-devel libvorbis-devel fdk-aac-free-devel
 ```
 
 **Ubuntu/Debian:**
 ```bash
+# Required
 sudo apt install -y build-essential cmake pkg-config libflac-dev
+# Optional codecs (recommended for internet radio)
+sudo apt install -y libmpg123-dev libvorbis-dev libfdk-aac-dev
 ```
 
 **Arch/AudioLinux:**
 ```bash
+# Required
 sudo pacman -S base-devel cmake pkgconf flac
+# Optional codecs (recommended for internet radio)
+sudo pacman -S mpg123 libvorbis libfdk-aac
 ```
+
+> **Note**: Codec libraries are optional. If a library is not found at build time, the corresponding codec is simply disabled. FLAC and PCM are always available.
 
 #### 2. Download Diretta Host SDK
 
@@ -444,6 +463,32 @@ sudo journalctl -u slim2diretta@1 -n 20
 
 ---
 
+## Internet Radio Support
+
+slim2diretta supports internet radio playback via the following codecs:
+
+| Codec | Library | License | Status |
+|-------|---------|---------|--------|
+| **MP3** | libmpg123 | LGPL-2.1 | Optional (auto-detected) |
+| **AAC** | fdk-aac | BSD-like | Optional (auto-detected) |
+| **Ogg Vorbis** | libvorbisfile | BSD-3-Clause | Optional (auto-detected) |
+
+All codecs include **error recovery** for robust radio streaming (automatic resync on corrupted frames, gap handling).
+
+CMake reports the codec status during build:
+```
+-- Codecs:
+--   FLAC:           ENABLED (always)
+--   PCM:            ENABLED (always)
+--   MP3:            ENABLED (libmpg123)
+--   Ogg Vorbis:     ENABLED (libvorbisfile)
+--   AAC:            ENABLED (fdk-aac)
+```
+
+To disable a specific codec: `cmake -DENABLE_MP3=OFF ..`
+
+---
+
 ## Roon Compatibility
 
 slim2diretta works with **Roon** in Squeezebox emulation mode:
@@ -538,4 +583,4 @@ This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) 
 
 **Enjoy native DSD and hi-res PCM streaming from your LMS library!**
 
-*Last updated: 2026-02-27 (v0.1.0 - Test Version)*
+*Last updated: 2026-02-27 (v0.2.0 - Test Version)*

@@ -580,6 +580,15 @@ std::string SlimprotoClient::buildCapabilities() const {
 
     // Codecs — LMS splits on commas and matches ^[a-z][a-z0-9]{1,4}$
     caps << "flc,pcm,aif,wav";
+#ifdef ENABLE_MP3
+    caps << ",mp3";
+#endif
+#ifdef ENABLE_OGG
+    caps << ",ogg";
+#endif
+#ifdef ENABLE_AAC
+    caps << ",aac";
+#endif
     if (m_config.dsdEnabled) {
         caps << ",dsf,dff";  // DSD container formats recognized by LMS
     }
