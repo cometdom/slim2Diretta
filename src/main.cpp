@@ -605,10 +605,9 @@ int main(int argc, char* argv[]) {
                             auto fmt = decoder->getFormat();
                             if (fmt.sampleRate > 0) {
                                 uint64_t decoded = decoder->getDecodedSamples();
-                                uint32_t elapsedSec = static_cast<uint32_t>(
-                                    decoded / fmt.sampleRate);
-                                uint32_t elapsedMs = static_cast<uint32_t>(
-                                    (decoded % fmt.sampleRate) * 1000 / fmt.sampleRate);
+                                uint64_t totalMs = decoded * 1000 / fmt.sampleRate;
+                                uint32_t elapsedSec = static_cast<uint32_t>(totalMs / 1000);
+                                uint32_t elapsedMs = static_cast<uint32_t>(totalMs);
                                 slimproto->updateElapsed(elapsedSec, elapsedMs);
 
                                 if (elapsedSec >= lastElapsedLog + 10) {
@@ -685,10 +684,9 @@ int main(int argc, char* argv[]) {
                             auto fmt = decoder->getFormat();
                             if (fmt.sampleRate > 0) {
                                 uint64_t decoded = decoder->getDecodedSamples();
-                                uint32_t elapsedSec = static_cast<uint32_t>(
-                                    decoded / fmt.sampleRate);
-                                uint32_t elapsedMs = static_cast<uint32_t>(
-                                    (decoded % fmt.sampleRate) * 1000 / fmt.sampleRate);
+                                uint64_t totalMs = decoded * 1000 / fmt.sampleRate;
+                                uint32_t elapsedSec = static_cast<uint32_t>(totalMs / 1000);
+                                uint32_t elapsedMs = static_cast<uint32_t>(totalMs);
                                 slimproto->updateElapsed(elapsedSec, elapsedMs);
                             }
                         }
