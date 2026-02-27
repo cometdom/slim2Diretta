@@ -458,13 +458,11 @@ int main(int argc, char* argv[]) {
                         bool formatLogged = false;
                         uint64_t lastElapsedLog = 0;
 
-                        // DSD cache: planar uint8_t buffer
-                        constexpr size_t DSD_CACHE_MAX_BYTES = 1048576;  // 1MB
-                        std::vector<uint8_t> dsdCache;
-                        size_t dsdCachePos = 0;
-
-                        constexpr size_t DSD_READ_CHUNK = 65536;
-                        uint8_t dsdReadBuf[DSD_READ_CHUNK];
+                        // Planar buffer: readPlanar() fills this, sendAudio() consumes it directly.
+                        // No intermediate cache — each readPlanar output is a self-contained
+                        // planar chunk that must be sent as-is to preserve [L...][R...] structure.
+                        constexpr size_t DSD_PLANAR_BUF = 65536;
+                        uint8_t planarBuf[DSD_PLANAR_BUF];
 
                         constexpr unsigned int PREBUFFER_MS = 500;
                         uint64_t pushedDsdBytes = 0;
@@ -472,18 +470,16 @@ int main(int argc, char* argv[]) {
                         AudioFormat audioFmt{};
                         uint32_t detectedChannels = 2;
                         uint32_t dsdBitRate = 0;
-
-                        auto cacheBytes = [&]() -> size_t {
-                            return dsdCache.size() - dsdCachePos;
-                        };
+                        uint64_t byteRateTotal = 0;
 
                         bool httpEof = false;
                         while (audioTestRunning.load(std::memory_order_acquire) &&
-                               (!httpEof || cacheBytes() > 0)) {
+                               (!httpEof || dsdReader->availableBytes() > 0 ||
+                                !dsdReader->isFinished())) {
 
-                            // === PHASE 1a: HTTP read ===
+                            // === PHASE 1: HTTP read + feed ===
                             bool gotData = false;
-                            if (dsdCache.size() - dsdCachePos < DSD_CACHE_MAX_BYTES && !httpEof) {
+                            if (!httpEof) {
                                 if (httpStream->isConnected()) {
                                     ssize_t n = httpStream->readWithTimeout(httpBuf, sizeof(httpBuf), 2);
                                     if (n > 0) {
@@ -501,21 +497,13 @@ int main(int argc, char* argv[]) {
                                 }
                             }
 
-                            // === PHASE 1b: Drain DsdStreamReader into cache ===
-                            if (dsdCache.size() - dsdCachePos < DSD_CACHE_MAX_BYTES) {
-                                while (true) {
-                                    size_t bytes = dsdReader->readPlanar(dsdReadBuf, DSD_READ_CHUNK);
-                                    if (bytes == 0) break;
-                                    dsdCache.insert(dsdCache.end(), dsdReadBuf, dsdReadBuf + bytes);
-                                }
-                            }
-
                             // === PHASE 2: Format detection ===
                             if (!formatLogged && dsdReader->isFormatReady()) {
                                 formatLogged = true;
                                 const auto& fmt = dsdReader->getFormat();
                                 dsdBitRate = fmt.sampleRate;
                                 detectedChannels = fmt.channels;
+                                byteRateTotal = (static_cast<uint64_t>(dsdBitRate) / 8) * detectedChannels;
 
                                 audioFmt.sampleRate = dsdBitRate;
                                 audioFmt.bitDepth = 1;
@@ -526,14 +514,12 @@ int main(int argc, char* argv[]) {
                                     : AudioFormat::DSDFormat::DSF;
                             }
 
-                            // === PHASE 3: Prebuffer ===
+                            // === PHASE 3: Prebuffer (wait for enough raw data) ===
                             if (formatLogged && !direttaOpened) {
-                                uint64_t byteRateTotal = (static_cast<uint64_t>(dsdBitRate) / 8) * detectedChannels;
                                 size_t targetBytes = static_cast<size_t>(byteRateTotal * PREBUFFER_MS / 1000);
 
-                                if (cacheBytes() >= targetBytes || httpEof) {
-                                    size_t prebufBytes = cacheBytes();
-                                    if (prebufBytes == 0) continue;
+                                if (dsdReader->availableBytes() >= targetBytes || httpEof) {
+                                    if (dsdReader->availableBytes() == 0) continue;
 
                                     if (!direttaPtr->open(audioFmt)) {
                                         LOG_ERROR("[Audio] Failed to open Diretta for DSD");
@@ -543,45 +529,35 @@ int main(int argc, char* argv[]) {
                                     }
 
                                     uint32_t prebufMs = byteRateTotal > 0
-                                        ? static_cast<uint32_t>(prebufBytes * 1000 / byteRateTotal) : 0;
-                                    LOG_INFO("[Audio] DSD pre-buffered " << prebufBytes
+                                        ? static_cast<uint32_t>(dsdReader->availableBytes() * 1000 / byteRateTotal) : 0;
+                                    LOG_INFO("[Audio] DSD pre-buffered "
+                                             << dsdReader->availableBytes()
                                              << " bytes (" << prebufMs << "ms)");
 
-                                    // Flush prebuffer at full speed
-                                    const uint8_t* ptr = dsdCache.data() + dsdCachePos;
-                                    size_t remaining = prebufBytes;
-                                    while (remaining > 0 &&
-                                           audioTestRunning.load(std::memory_order_relaxed)) {
-                                        size_t chunk = std::min(remaining, DSD_READ_CHUNK);
-                                        // Align to channels * 4
-                                        chunk = (chunk / (detectedChannels * 4)) * (detectedChannels * 4);
-                                        if (chunk == 0) break;
-                                        size_t numSamples = (chunk * 8) / detectedChannels;
-                                        direttaPtr->sendAudio(ptr, numSamples);
-                                        ptr += chunk;
-                                        remaining -= chunk;
+                                    // Flush prebuffer: readPlanar → sendAudio directly
+                                    while (audioTestRunning.load(std::memory_order_relaxed)) {
+                                        size_t bytes = dsdReader->readPlanar(planarBuf, DSD_PLANAR_BUF);
+                                        if (bytes == 0) break;
+                                        size_t numSamples = (bytes * 8) / detectedChannels;
+                                        direttaPtr->sendAudio(planarBuf, numSamples);
+                                        pushedDsdBytes += bytes;
                                     }
-                                    dsdCachePos += prebufBytes;
-                                    pushedDsdBytes += prebufBytes;
                                     direttaOpened = true;
                                     slimproto->sendStat(StatEvent::STMl);
                                 }
                                 continue;
                             }
 
-                            // === PHASE 4: Push DSD to DirettaSync ===
-                            if (direttaOpened && cacheBytes() > 0) {
+                            // === PHASE 4: Push DSD — readPlanar directly to sendAudio ===
+                            if (direttaOpened && dsdReader->availableBytes() > 0) {
                                 if (direttaPtr->isPaused()) {
                                     std::this_thread::sleep_for(std::chrono::milliseconds(100));
                                 } else if (direttaPtr->getBufferLevel() <= 0.95f) {
-                                    size_t push = std::min(cacheBytes(), DSD_READ_CHUNK);
-                                    push = (push / (detectedChannels * 4)) * (detectedChannels * 4);
-                                    if (push > 0) {
-                                        size_t numSamples = (push * 8) / detectedChannels;
-                                        direttaPtr->sendAudio(
-                                            dsdCache.data() + dsdCachePos, numSamples);
-                                        dsdCachePos += push;
-                                        pushedDsdBytes += push;
+                                    size_t bytes = dsdReader->readPlanar(planarBuf, DSD_PLANAR_BUF);
+                                    if (bytes > 0) {
+                                        size_t numSamples = (bytes * 8) / detectedChannels;
+                                        direttaPtr->sendAudio(planarBuf, numSamples);
+                                        pushedDsdBytes += bytes;
                                     }
                                 } else {
                                     std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -589,9 +565,8 @@ int main(int argc, char* argv[]) {
                             }
 
                             // === PHASE 5: Update elapsed time ===
-                            if (direttaOpened && dsdBitRate > 0) {
-                                uint64_t bytesPerSec = (static_cast<uint64_t>(dsdBitRate) / 8) * detectedChannels;
-                                uint64_t totalMs = (pushedDsdBytes * 1000) / bytesPerSec;
+                            if (direttaOpened && byteRateTotal > 0) {
+                                uint64_t totalMs = (pushedDsdBytes * 1000) / byteRateTotal;
                                 uint32_t elapsedSec = static_cast<uint32_t>(totalMs / 1000);
                                 uint32_t elapsedMs = static_cast<uint32_t>(totalMs);
                                 slimproto->updateElapsed(elapsedSec, elapsedMs);
@@ -600,19 +575,12 @@ int main(int argc, char* argv[]) {
                                     lastElapsedLog = elapsedSec;
                                     LOG_DEBUG("[Audio] DSD elapsed: " << elapsedSec << "s"
                                               << " (" << pushedDsdBytes << " bytes pushed)"
-                                              << " cache=" << cacheBytes() << "b");
+                                              << " buf=" << dsdReader->availableBytes() << "b");
                                 }
                             }
 
-                            // === PHASE 6: Compact cache ===
-                            if (dsdCachePos > 100000) {
-                                dsdCache.erase(dsdCache.begin(),
-                                    dsdCache.begin() + dsdCachePos);
-                                dsdCachePos = 0;
-                            }
-
-                            // === PHASE 7: Anti-busy-loop ===
-                            if (!gotData && cacheBytes() == 0 && !httpEof) {
+                            // === PHASE 6: Anti-busy-loop ===
+                            if (!gotData && dsdReader->availableBytes() == 0 && !httpEof) {
                                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
                             }
 
@@ -622,18 +590,11 @@ int main(int argc, char* argv[]) {
                             }
                         }
 
-                        // === DRAIN ===
+                        // === DRAIN remaining data ===
                         dsdReader->setEof();
-                        while (!dsdReader->isFinished() && !dsdReader->hasError() &&
+                        while (direttaOpened &&
                                audioTestRunning.load(std::memory_order_acquire)) {
-                            size_t bytes = dsdReader->readPlanar(dsdReadBuf, DSD_READ_CHUNK);
-                            if (bytes == 0) break;
-                            dsdCache.insert(dsdCache.end(), dsdReadBuf, dsdReadBuf + bytes);
-                        }
-
-                        // Push remaining cache
-                        while (direttaOpened && cacheBytes() > 0 &&
-                               audioTestRunning.load(std::memory_order_acquire)) {
+                            // Wait for DirettaSync space
                             while (audioTestRunning.load(std::memory_order_acquire)) {
                                 if (direttaPtr->isPaused()) {
                                     std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -646,17 +607,14 @@ int main(int argc, char* argv[]) {
                                 }
                                 break;
                             }
-                            size_t push = std::min(cacheBytes(), DSD_READ_CHUNK);
-                            push = (push / (detectedChannels * 4)) * (detectedChannels * 4);
-                            if (push == 0) break;
-                            size_t numSamples = (push * 8) / detectedChannels;
-                            direttaPtr->sendAudio(dsdCache.data() + dsdCachePos, numSamples);
-                            dsdCachePos += push;
-                            pushedDsdBytes += push;
+                            size_t bytes = dsdReader->readPlanar(planarBuf, DSD_PLANAR_BUF);
+                            if (bytes == 0) break;
+                            size_t numSamples = (bytes * 8) / detectedChannels;
+                            direttaPtr->sendAudio(planarBuf, numSamples);
+                            pushedDsdBytes += bytes;
 
-                            if (dsdBitRate > 0) {
-                                uint64_t bytesPerSec = (static_cast<uint64_t>(dsdBitRate) / 8) * detectedChannels;
-                                uint64_t totalMs = (pushedDsdBytes * 1000) / bytesPerSec;
+                            if (byteRateTotal > 0) {
+                                uint64_t totalMs = (pushedDsdBytes * 1000) / byteRateTotal;
                                 slimproto->updateElapsed(
                                     static_cast<uint32_t>(totalMs / 1000),
                                     static_cast<uint32_t>(totalMs));

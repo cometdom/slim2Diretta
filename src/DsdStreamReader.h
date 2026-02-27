@@ -62,6 +62,11 @@ public:
     uint64_t getTotalBytesOutput() const { return m_totalBytesOutput; }
 
     /**
+     * @brief Get bytes of raw DSD data available for readPlanar
+     */
+    size_t availableBytes() const { return m_dataBuf.size(); }
+
+    /**
      * @brief Set raw DSD format hint from strm parameters (no container)
      */
     void setRawDsdFormat(uint32_t dsdRate, uint32_t channels);
