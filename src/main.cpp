@@ -461,7 +461,13 @@ int main(int argc, char* argv[]) {
                         // Planar buffer: readPlanar() fills this, sendAudio() consumes it directly.
                         // No intermediate cache — each readPlanar output is a self-contained
                         // planar chunk that must be sent as-is to preserve [L...][R...] structure.
-                        constexpr size_t DSD_PLANAR_BUF = 65536;
+                        //
+                        // CRITICAL: Keep this small! pushDSDPlanarOptimized computes the R channel
+                        // offset from the pushed size, not the input size. If the ring buffer
+                        // doesn't have room for the full chunk, a partial push reads R data from
+                        // the wrong position (inside L data). Small chunks avoid this by always
+                        // fitting in the ring buffer's free space.
+                        constexpr size_t DSD_PLANAR_BUF = 16384;  // ~2 block groups max
                         uint8_t planarBuf[DSD_PLANAR_BUF];
 
                         constexpr unsigned int PREBUFFER_MS = 500;
@@ -537,7 +543,9 @@ int main(int argc, char* argv[]) {
                                              << " bytes (" << prebufMs << "ms)");
 
                                     // Flush prebuffer: readPlanar → sendAudio directly
+                                    // Respect ring buffer capacity to avoid partial pushes
                                     while (audioTestRunning.load(std::memory_order_relaxed)) {
+                                        if (direttaPtr->getBufferLevel() > 0.90f) break;
                                         size_t bytes = dsdReader->readPlanar(planarBuf, DSD_PLANAR_BUF);
                                         if (bytes == 0) break;
                                         size_t numSamples = (bytes * 8) / detectedChannels;
