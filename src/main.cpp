@@ -290,7 +290,7 @@ static bool detectDoP(const int32_t* samples, size_t numFrames, int channels) {
             (samples[i * channels] >> 24) & 0xFF);
         if (i == 0) {
             if (marker != 0x05 && marker != 0xFA) return false;
-            expected = marker;
+            expected = (marker == 0x05) ? 0xFA : 0x05;  // Expect alternate
             matches++;
         } else {
             if (marker == expected) matches++;
