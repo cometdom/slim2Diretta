@@ -265,6 +265,42 @@ Config parseArguments(int argc, char* argv[]) {
 }
 
 // ============================================
+// DoP Detection
+// ============================================
+
+/**
+ * @brief Detect DoP (DSD over PCM) in decoded int32_t samples
+ *
+ * DoP samples are MSB-aligned int32_t with marker bytes in the top byte:
+ *   Memory (LE): [0x00][dsd_lsb][dsd_msb][marker]
+ *   marker alternates 0x05 / 0xFA per frame
+ *
+ * @param samples Decoded int32_t interleaved samples
+ * @param numFrames Number of frames to check
+ * @param channels Number of channels
+ * @return true if DoP markers detected
+ */
+static bool detectDoP(const int32_t* samples, size_t numFrames, int channels) {
+    if (numFrames < 16) return false;
+    size_t check = std::min(numFrames, size_t(32));
+    int matches = 0;
+    uint8_t expected = 0;
+    for (size_t i = 0; i < check; i++) {
+        uint8_t marker = static_cast<uint8_t>(
+            (samples[i * channels] >> 24) & 0xFF);
+        if (i == 0) {
+            if (marker != 0x05 && marker != 0xFA) return false;
+            expected = marker;
+            matches++;
+        } else {
+            if (marker == expected) matches++;
+            expected = (expected == 0x05) ? 0xFA : 0x05;
+        }
+    }
+    return matches >= static_cast<int>(check * 9 / 10);
+}
+
+// ============================================
 // Main
 // ============================================
 
@@ -695,6 +731,11 @@ int main(int argc, char* argv[]) {
                     AudioFormat audioFmt{};
                     int detectedChannels = 2;
 
+                    // DoP (DSD over PCM) detection — Roon sends DSD as DoP
+                    bool dopDetected = false;
+                    uint32_t dopPcmRate = 0;  // Original PCM carrier rate for elapsed
+                    std::vector<uint8_t> dopBuf;  // Conversion buffer (allocated if DoP)
+
                     // Helper: available frames in decode cache
                     auto cacheFrames = [&]() -> size_t {
                         return (decodeCache.size() - decodeCachePos) /
@@ -764,20 +805,51 @@ int main(int argc, char* argv[]) {
                                 size_t prebufFrames = cacheFrames();
                                 if (prebufFrames == 0) continue;
 
+                                // Detect DoP (DSD over PCM) — Roon sends
+                                // DSD as DoP with format code 'p'
+                                if (!dopDetected && cacheFrames() >= 32) {
+                                    const int32_t* samples =
+                                        decodeCache.data() + decodeCachePos;
+                                    if (detectDoP(samples, cacheFrames(),
+                                                  detectedChannels)) {
+                                        dopDetected = true;
+                                        dopPcmRate = audioFmt.sampleRate;
+                                        uint32_t dsdRate =
+                                            DsdProcessor::calculateDsdRate(
+                                                dopPcmRate, true);
+                                        audioFmt.isDSD = true;
+                                        audioFmt.sampleRate = dsdRate;
+                                        audioFmt.dsdFormat =
+                                            AudioFormat::DSDFormat::DFF;
+                                        dopBuf.resize(MAX_DECODE_FRAMES * 2
+                                                      * detectedChannels);
+                                        LOG_INFO("[Audio] DoP detected — "
+                                            << DsdProcessor::rateName(dsdRate)
+                                            << " (" << dsdRate << " Hz), "
+                                            << detectedChannels << " ch, "
+                                            << "carrier " << dopPcmRate
+                                            << " Hz");
+                                    }
+                                }
+
                                 if (!direttaPtr->open(audioFmt)) {
                                     LOG_ERROR("[Audio] Failed to open Diretta output");
                                     slimproto->sendStat(StatEvent::STMn);
                                     audioThreadDone.store(true, std::memory_order_release);
                                     return;
                                 }
-                                // Set S24 pack mode hint AFTER open() — open() calls
-                                // clear() which resets the hint. Our decoders always
-                                // output MSB-aligned int32_t samples.
-                                direttaPtr->setS24PackModeHint(
-                                    DirettaRingBuffer::S24PackMode::MsbAligned);
+                                if (!dopDetected) {
+                                    // Set S24 pack mode hint AFTER open() — open()
+                                    // calls clear() which resets the hint. Our decoders
+                                    // always output MSB-aligned int32_t samples.
+                                    // Not needed for DoP (DSD mode uses byte push).
+                                    direttaPtr->setS24PackModeHint(
+                                        DirettaRingBuffer::S24PackMode::MsbAligned);
+                                }
 
                                 uint32_t prebufMs = static_cast<uint32_t>(
-                                    prebufFrames * 1000 / fmt.sampleRate);
+                                    prebufFrames * 1000 / (dopDetected
+                                        ? dopPcmRate : fmt.sampleRate));
                                 LOG_INFO("[Audio] Pre-buffered " << prebufFrames
                                          << " frames (" << prebufMs << "ms)");
 
@@ -789,8 +861,23 @@ int main(int argc, char* argv[]) {
                                        audioTestRunning.load(std::memory_order_relaxed)) {
                                     if (direttaPtr->getBufferLevel() > 0.95f) break;
                                     size_t chunk = std::min(remaining, MAX_DECODE_FRAMES);
-                                    direttaPtr->sendAudio(
-                                        reinterpret_cast<const uint8_t*>(ptr), chunk);
+                                    if (dopDetected) {
+                                        // Convert DoP → native DSD planar
+                                        DsdProcessor::convertDopToNative(
+                                            reinterpret_cast<const uint8_t*>(ptr),
+                                            dopBuf.data(), chunk,
+                                            detectedChannels);
+                                        size_t dsdBytes = chunk * 2
+                                                          * detectedChannels;
+                                        size_t numDsdSamples =
+                                            dsdBytes * 8 / detectedChannels;
+                                        direttaPtr->sendAudio(
+                                            dopBuf.data(), numDsdSamples);
+                                    } else {
+                                        direttaPtr->sendAudio(
+                                            reinterpret_cast<const uint8_t*>(ptr),
+                                            chunk);
+                                    }
                                     ptr += chunk * detectedChannels;
                                     remaining -= chunk;
                                     actualPushed += chunk;
@@ -811,10 +898,24 @@ int main(int argc, char* argv[]) {
                             } else if (direttaPtr->getBufferLevel() <= 0.95f) {
                                 // Buffer has space - push one chunk
                                 size_t push = std::min(cacheFrames(), MAX_DECODE_FRAMES);
-                                direttaPtr->sendAudio(
-                                    reinterpret_cast<const uint8_t*>(
-                                        decodeCache.data() + decodeCachePos),
-                                    push);
+                                if (dopDetected) {
+                                    DsdProcessor::convertDopToNative(
+                                        reinterpret_cast<const uint8_t*>(
+                                            decodeCache.data() + decodeCachePos),
+                                        dopBuf.data(), push,
+                                        detectedChannels);
+                                    size_t dsdBytes = push * 2
+                                                      * detectedChannels;
+                                    size_t numDsdSamples =
+                                        dsdBytes * 8 / detectedChannels;
+                                    direttaPtr->sendAudio(
+                                        dopBuf.data(), numDsdSamples);
+                                } else {
+                                    direttaPtr->sendAudio(
+                                        reinterpret_cast<const uint8_t*>(
+                                            decodeCache.data() + decodeCachePos),
+                                        push);
+                                }
                                 decodeCachePos += push * detectedChannels;
                                 pushedFrames += push;
                             } else {
@@ -828,8 +929,10 @@ int main(int argc, char* argv[]) {
                         // ========== PHASE 5: Update elapsed time ==========
                         if (direttaOpened && decoder->isFormatReady()) {
                             auto fmt = decoder->getFormat();
-                            if (fmt.sampleRate > 0) {
-                                uint64_t totalMs = pushedFrames * 1000 / fmt.sampleRate;
+                            uint32_t elapsedRate = dopDetected
+                                ? dopPcmRate : fmt.sampleRate;
+                            if (elapsedRate > 0) {
+                                uint64_t totalMs = pushedFrames * 1000 / elapsedRate;
                                 uint32_t elapsedSec = static_cast<uint32_t>(totalMs / 1000);
                                 uint32_t elapsedMs = static_cast<uint32_t>(totalMs);
                                 slimproto->updateElapsed(elapsedSec, elapsedMs);
@@ -897,18 +1000,32 @@ int main(int argc, char* argv[]) {
                             break;
                         }
                         size_t push = std::min(cacheFrames(), MAX_DECODE_FRAMES);
-                        direttaPtr->sendAudio(
-                            reinterpret_cast<const uint8_t*>(
-                                decodeCache.data() + decodeCachePos),
-                            push);
+                        if (dopDetected) {
+                            DsdProcessor::convertDopToNative(
+                                reinterpret_cast<const uint8_t*>(
+                                    decodeCache.data() + decodeCachePos),
+                                dopBuf.data(), push, detectedChannels);
+                            size_t dsdBytes = push * 2 * detectedChannels;
+                            size_t numDsdSamples =
+                                dsdBytes * 8 / detectedChannels;
+                            direttaPtr->sendAudio(
+                                dopBuf.data(), numDsdSamples);
+                        } else {
+                            direttaPtr->sendAudio(
+                                reinterpret_cast<const uint8_t*>(
+                                    decodeCache.data() + decodeCachePos),
+                                push);
+                        }
                         decodeCachePos += push * detectedChannels;
                         pushedFrames += push;
 
                         // Update elapsed during drain
                         if (decoder->isFormatReady()) {
                             auto fmt = decoder->getFormat();
-                            if (fmt.sampleRate > 0) {
-                                uint64_t totalMs = pushedFrames * 1000 / fmt.sampleRate;
+                            uint32_t elapsedRate = dopDetected
+                                ? dopPcmRate : fmt.sampleRate;
+                            if (elapsedRate > 0) {
+                                uint64_t totalMs = pushedFrames * 1000 / elapsedRate;
                                 uint32_t elapsedSec = static_cast<uint32_t>(totalMs / 1000);
                                 uint32_t elapsedMs = static_cast<uint32_t>(totalMs);
                                 slimproto->updateElapsed(elapsedSec, elapsedMs);
