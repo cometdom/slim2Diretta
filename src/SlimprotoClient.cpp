@@ -283,7 +283,15 @@ void SlimprotoClient::handleStrm(const uint8_t* data, size_t len) {
             uint32_t ts = cmd.getReplayGain();
             m_serverTimestamp = ts;
             sendStat(StatEvent::STMt, ts);
-            LOG_DEBUG("[Slimproto] strm-t: heartbeat (ts=" << ts << ")");
+            // Log heartbeat only once per minute to reduce noise
+            {
+                static uint32_t lastLoggedTs = 0;
+                if (ts == 0 || ts >= lastLoggedTs + 60000) {
+                    LOG_DEBUG("[Slimproto] heartbeat (ts="
+                              << ts << ")");
+                    lastLoggedTs = ts;
+                }
+            }
             return;  // Don't invoke stream callback for heartbeats
         }
 
@@ -435,8 +443,11 @@ void SlimprotoClient::sendStat(const char eventCode[4], uint32_t serverTimestamp
 
     sendMessage("STAT", &stat, sizeof(stat));
 
-    std::string evt(eventCode, 4);
-    LOG_DEBUG("[Slimproto] STAT sent: " << evt);
+    // Don't log heartbeat responses (too noisy — every 2s)
+    if (std::memcmp(eventCode, StatEvent::STMt, 4) != 0) {
+        std::string evt(eventCode, 4);
+        LOG_DEBUG("[Slimproto] STAT sent: " << evt);
+    }
 }
 
 // ============================================
