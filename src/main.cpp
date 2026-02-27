@@ -781,19 +781,22 @@ int main(int argc, char* argv[]) {
                                 LOG_INFO("[Audio] Pre-buffered " << prebufFrames
                                          << " frames (" << prebufMs << "ms)");
 
-                                // Flush prebuffer at full speed (no flow control)
+                                // Flush prebuffer — stop when ring buffer is full
                                 const int32_t* ptr = decodeCache.data() + decodeCachePos;
                                 size_t remaining = prebufFrames;
+                                size_t actualPushed = 0;
                                 while (remaining > 0 &&
                                        audioTestRunning.load(std::memory_order_relaxed)) {
+                                    if (direttaPtr->getBufferLevel() > 0.95f) break;
                                     size_t chunk = std::min(remaining, MAX_DECODE_FRAMES);
                                     direttaPtr->sendAudio(
                                         reinterpret_cast<const uint8_t*>(ptr), chunk);
                                     ptr += chunk * detectedChannels;
                                     remaining -= chunk;
+                                    actualPushed += chunk;
                                 }
-                                decodeCachePos += prebufFrames * detectedChannels;
-                                pushedFrames += prebufFrames;
+                                decodeCachePos += actualPushed * detectedChannels;
+                                pushedFrames += actualPushed;
                                 direttaOpened = true;
                                 slimproto->sendStat(StatEvent::STMl);
                             }

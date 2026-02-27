@@ -428,8 +428,13 @@ bool DirettaSync::open(const AudioFormat& format) {
         if (sameFormat) {
             std::cout << "[DirettaSync] Same format - quick resume (no setSink)" << std::endl;
 
-            // Send silence before transition to flush Diretta pipeline
-            // Both DSD and PCM need this for a clean gap between tracks
+            // Mirror the proven pause/unpause pattern:
+            // 1. Flush silence into pipeline
+            // 2. Stop SDK playback (prevents getNewStream calls)
+            // 3. Clear buffer (safe — no concurrent worker access)
+            // 4. Restart playback
+            // Without stop(), stale data from the previous track can leak
+            // through between the silence phase and the buffer clear.
             {
                 int silenceCount = m_isDsdMode.load(std::memory_order_acquire) ? 30 : 10;
                 requestShutdownSilence(silenceCount);
@@ -440,23 +445,24 @@ bool DirettaSync::open(const AudioFormat& format) {
                 }
             }
 
-            // Clear buffer and reset flags under ReconfigureGuard
-            // CRITICAL: Without ReconfigureGuard, clear() races with the worker
-            // thread's pop() — the worker can overwrite the reset read position,
-            // causing it to read stale data from the previous track.
+            // Stop SDK playback — this is what pause does and what makes
+            // pause/unpause work reliably. Prevents getNewStream() calls
+            // so clear() has no concurrent access.
+            stop();
+
+            // Clear buffer and reset flags
             // NOTE: Do NOT reset m_postOnlineDelayDone for quick resume!
             // The DAC is already stable from the previous track.
-            {
-                ReconfigureGuard guard(*this);
-                m_ringBuffer.clear();
-                m_prefillComplete = false;
-                m_rebuffering.store(false, std::memory_order_relaxed);
-            }
+            m_ringBuffer.clear();
+            m_prefillComplete = false;
+            m_rebuffering.store(false, std::memory_order_relaxed);
             // m_postOnlineDelayDone stays true - DAC already stable
             m_stabilizationCount = 0;
             m_stopRequested = false;
             m_draining = false;
             m_silenceBuffersRemaining = 0;
+
+            // Restart playback (like unpause does)
             play();
             m_playing = true;
             m_paused = false;
