@@ -79,6 +79,18 @@ public:
     virtual void flush() = 0;
 
     /**
+     * @brief Set raw PCM format hint from strm command parameters.
+     *
+     * When the server sends raw PCM (no WAV/AIFF container), the format
+     * must come from the strm command. Roon uses this mode.
+     * Only meaningful for PcmDecoder; other decoders ignore this.
+     */
+    virtual void setRawPcmFormat(uint32_t sampleRate, uint32_t bitDepth,
+                                  uint32_t channels, bool bigEndian) {
+        (void)sampleRate; (void)bitDepth; (void)channels; (void)bigEndian;
+    }
+
+    /**
      * @brief Create decoder for the given Slimproto format code
      * @param formatCode 'f' = FLAC, 'p' = PCM (WAV/AIFF), 'a' = AAC, etc.
      * @return Decoder instance, or nullptr for unsupported formats

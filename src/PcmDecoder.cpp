@@ -102,6 +102,17 @@ size_t PcmDecoder::readDecoded(int32_t* out, size_t maxFrames) {
     return framesToConvert;
 }
 
+void PcmDecoder::setRawPcmFormat(uint32_t sampleRate, uint32_t bitDepth,
+                                  uint32_t channels, bool bigEndian) {
+    m_format.sampleRate = sampleRate;
+    m_format.bitDepth = bitDepth;
+    m_format.channels = channels;
+    m_format.totalSamples = 0;  // Unknown for raw streams
+    m_bigEndian = bigEndian;
+    m_shift = 32 - bitDepth;
+    m_rawPcmConfigured = true;
+}
+
 void PcmDecoder::flush() {
     m_state = State::DETECT;
     m_headerBuf.clear();
@@ -111,6 +122,7 @@ void PcmDecoder::flush() {
     m_bigEndian = false;
     m_shift = 0;
     m_dataRemaining = 0;
+    m_rawPcmConfigured = false;
     m_eof = false;
     m_error = false;
     m_finished = false;
@@ -131,8 +143,20 @@ bool PcmDecoder::detectContainer() {
         return true;
     }
 
-    // No recognized container — treat as error for now
-    // (raw PCM would need format info from strm command, handled in PlayerController)
+    // No container — use raw PCM format from strm command (Roon, etc.)
+    if (m_rawPcmConfigured) {
+        m_formatReady = true;
+        m_dataRemaining = 0;  // Unlimited (stream until EOF)
+        // Move all accumulated data to data buffer (it's audio, not a header)
+        m_dataBuf.insert(m_dataBuf.end(), m_headerBuf.begin(), m_headerBuf.end());
+        m_headerBuf.clear();
+        m_state = State::DATA;
+        LOG_INFO("[PCM] Raw: " << m_format.sampleRate << " Hz, "
+                 << m_format.bitDepth << "-bit, " << m_format.channels << " ch"
+                 << (m_bigEndian ? " BE" : " LE"));
+        return true;
+    }
+
     LOG_ERROR("[PCM] Unknown container magic: 0x"
               << std::hex << (int)m_headerBuf[0] << (int)m_headerBuf[1]
               << (int)m_headerBuf[2] << (int)m_headerBuf[3] << std::dec);

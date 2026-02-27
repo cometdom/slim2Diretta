@@ -26,6 +26,8 @@ public:
     bool hasError() const override { return m_error; }
     uint64_t getDecodedSamples() const override { return m_decodedSamples; }
     void flush() override;
+    void setRawPcmFormat(uint32_t sampleRate, uint32_t bitDepth,
+                          uint32_t channels, bool bigEndian) override;
 
 private:
     enum class State { DETECT, PARSE_WAV, PARSE_AIFF, DATA, DONE, ERROR };
@@ -54,6 +56,7 @@ private:
 
     // Data tracking
     uint64_t m_dataRemaining = 0;  // Bytes remaining in data chunk (0 = unlimited)
+    bool m_rawPcmConfigured = false;  // Raw PCM format from strm command
     bool m_eof = false;
     bool m_error = false;
     bool m_finished = false;

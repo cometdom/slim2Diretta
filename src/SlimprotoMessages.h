@@ -55,26 +55,30 @@ constexpr char AUTOSTART_AUTO    = '1';
 constexpr char AUTOSTART_DIRECT  = '2';
 constexpr char AUTOSTART_DIRECT_AUTO = '3';
 
-// PCM sample size codes
-constexpr char PCM_SIZE_8  = '0';
-constexpr char PCM_SIZE_16 = '1';
-constexpr char PCM_SIZE_20 = '2';
-constexpr char PCM_SIZE_24 = '3';
-constexpr char PCM_SIZE_32 = '4';
+// PCM sample size codes (squeezelite mapping: indexed by code - '0')
+constexpr char PCM_SIZE_8    = '0';
+constexpr char PCM_SIZE_16   = '1';
+constexpr char PCM_SIZE_24   = '2';
+constexpr char PCM_SIZE_32   = '3';
 constexpr char PCM_SIZE_SELF = '?';
 
-// PCM sample rate codes
-constexpr char PCM_RATE_11K  = '0';
-constexpr char PCM_RATE_22K  = '1';
-constexpr char PCM_RATE_32K  = '2';
-constexpr char PCM_RATE_44K  = '3';
-constexpr char PCM_RATE_48K  = '4';
-constexpr char PCM_RATE_8K   = '5';
-constexpr char PCM_RATE_12K  = '6';
-constexpr char PCM_RATE_16K  = '7';
-constexpr char PCM_RATE_24K  = '8';
-constexpr char PCM_RATE_96K  = '9';
-constexpr char PCM_RATE_SELF = '?';
+// PCM sample rate codes (squeezelite mapping: indexed by code - '0')
+constexpr char PCM_RATE_11K   = '0';
+constexpr char PCM_RATE_22K   = '1';
+constexpr char PCM_RATE_32K   = '2';
+constexpr char PCM_RATE_44K   = '3';
+constexpr char PCM_RATE_48K   = '4';
+constexpr char PCM_RATE_8K    = '5';
+constexpr char PCM_RATE_12K   = '6';
+constexpr char PCM_RATE_16K   = '7';
+constexpr char PCM_RATE_24K   = '8';
+constexpr char PCM_RATE_96K   = '9';
+constexpr char PCM_RATE_88K   = ':';
+constexpr char PCM_RATE_176K  = ';';
+constexpr char PCM_RATE_192K  = '<';
+constexpr char PCM_RATE_352K  = '=';
+constexpr char PCM_RATE_384K  = '>';
+constexpr char PCM_RATE_SELF  = '?';
 
 // PCM channel codes
 constexpr char PCM_CHANNELS_MONO   = '1';
@@ -206,6 +210,7 @@ static_assert(sizeof(StatPayload) == 53, "StatPayload must be 53 bytes");
 // ============================================
 
 inline uint32_t sampleRateFromCode(char code) {
+    // Matches squeezelite pcm_sample_rate[] array (indexed by code - '0')
     switch (code) {
         case '0': return 11025;
         case '1': return 22050;
@@ -217,18 +222,23 @@ inline uint32_t sampleRateFromCode(char code) {
         case '7': return 16000;
         case '8': return 24000;
         case '9': return 96000;
-        default:  return 0;  // self-describing
+        case ':': return 88200;
+        case ';': return 176400;
+        case '<': return 192000;
+        case '=': return 352800;
+        case '>': return 384000;
+        default:  return 0;  // '?' = self-describing
     }
 }
 
 inline uint32_t sampleSizeFromCode(char code) {
+    // Matches squeezelite pcm_sample_size[] = {8, 16, 24, 32}
     switch (code) {
         case '0': return 8;
         case '1': return 16;
-        case '2': return 20;
-        case '3': return 24;
-        case '4': return 32;
-        default:  return 0;  // self-describing
+        case '2': return 24;
+        case '3': return 32;
+        default:  return 0;  // '?' = self-describing
     }
 }
 

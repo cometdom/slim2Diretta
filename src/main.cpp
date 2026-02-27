@@ -427,9 +427,13 @@ int main(int argc, char* argv[]) {
 
                 // Start audio decode thread
                 char formatCode = cmd.format;
+                char pcmRate = cmd.pcmSampleRate;
+                char pcmSize = cmd.pcmSampleSize;
+                char pcmChannels = cmd.pcmChannels;
+                char pcmEndian = cmd.pcmEndian;
                 audioTestRunning.store(true);
                 audioThreadDone.store(false, std::memory_order_release);
-                audioTestThread = std::thread([&httpStream, &slimproto, &audioTestRunning, &audioThreadDone, formatCode, direttaPtr]() {
+                audioTestThread = std::thread([&httpStream, &slimproto, &audioTestRunning, &audioThreadDone, formatCode, pcmRate, pcmSize, pcmChannels, pcmEndian, direttaPtr]() {
                     // Create decoder for this format
                     auto decoder = Decoder::create(formatCode);
                     if (!decoder) {
@@ -437,6 +441,18 @@ int main(int argc, char* argv[]) {
                         slimproto->sendStat(StatEvent::STMn);
                         audioThreadDone.store(true, std::memory_order_release);
                         return;
+                    }
+
+                    // Set raw PCM format hint from strm params (for Roon etc.)
+                    if (formatCode == FORMAT_PCM) {
+                        uint32_t sr = sampleRateFromCode(pcmRate);
+                        uint32_t bd = sampleSizeFromCode(pcmSize);
+                        uint32_t ch = (pcmChannels == '2') ? 2
+                                    : (pcmChannels == '1') ? 1 : 0;
+                        bool be = (pcmEndian == '0');
+                        if (sr > 0 && bd > 0 && ch > 0) {
+                            decoder->setRawPcmFormat(sr, bd, ch, be);
+                        }
                     }
 
                     slimproto->sendStat(StatEvent::STMs);  // Stream started
