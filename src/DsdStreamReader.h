@@ -64,7 +64,7 @@ public:
     /**
      * @brief Get bytes of raw DSD data available for readPlanar
      */
-    size_t availableBytes() const { return m_dataBuf.size(); }
+    size_t availableBytes() const { return m_dataBuf.size() - m_dataBufPos; }
 
     /**
      * @brief Set raw DSD format hint from strm parameters (no container)
@@ -103,6 +103,7 @@ private:
 
     // DSD data buffer (raw bytes from container)
     std::vector<uint8_t> m_dataBuf;
+    size_t m_dataBufPos = 0;  // Read position (avoids costly erase)
 
     DsdFormat m_format;
     bool m_formatReady = false;

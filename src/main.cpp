@@ -478,8 +478,10 @@ int main(int argc, char* argv[]) {
                                 !dsdReader->isFinished())) {
 
                             // === PHASE 1: HTTP read + feed ===
+                            // Flow control: don't read HTTP when internal buffer is large
+                            constexpr size_t DSD_BUF_MAX = 1048576;  // 1MB max
                             bool gotData = false;
-                            if (!httpEof) {
+                            if (!httpEof && dsdReader->availableBytes() < DSD_BUF_MAX) {
                                 if (httpStream->isConnected()) {
                                     ssize_t n = httpStream->readWithTimeout(httpBuf, sizeof(httpBuf), 2);
                                     if (n > 0) {

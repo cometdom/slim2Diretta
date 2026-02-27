@@ -57,6 +57,7 @@ void DsdStreamReader::flush() {
     m_state = State::DETECT;
     m_headerBuf.clear();
     m_dataBuf.clear();
+    m_dataBufPos = 0;
     m_format = DsdFormat{};
     m_formatReady = false;
     m_rawDsdConfigured = false;
@@ -452,7 +453,7 @@ size_t DsdStreamReader::processDsfBlocks(uint8_t* out, size_t maxBytes) {
     uint32_t blockGroup = bs * ch;
     if (blockGroup == 0) return 0;
 
-    size_t avail = m_dataBuf.size();
+    size_t avail = m_dataBuf.size() - m_dataBufPos;
     size_t maxGroups = maxBytes / blockGroup;
     size_t availGroups = avail / blockGroup;
     size_t groups = std::min(maxGroups, availGroups);
@@ -460,7 +461,6 @@ size_t DsdStreamReader::processDsfBlocks(uint8_t* out, size_t maxBytes) {
     if (groups == 0) {
         // At EOF, handle partial last block group
         if (m_eof && avail > 0 && m_dataRemaining == 0) {
-            // Partial block — treat each channel's portion separately
             size_t bytesPerCh = avail / ch;
             if (bytesPerCh == 0) return 0;
             size_t usable = bytesPerCh * ch;
@@ -469,9 +469,8 @@ size_t DsdStreamReader::processDsfBlocks(uint8_t* out, size_t maxBytes) {
                 usable = bytesPerCh * ch;
             }
             if (usable == 0) return 0;
-            // For partial block, data is [partial L][partial R] — already planar
-            std::memcpy(out, m_dataBuf.data(), usable);
-            m_dataBuf.erase(m_dataBuf.begin(), m_dataBuf.begin() + usable);
+            std::memcpy(out, m_dataBuf.data() + m_dataBufPos, usable);
+            m_dataBufPos += usable;
             m_totalBytesOutput += usable;
             return usable;
         }
@@ -480,7 +479,7 @@ size_t DsdStreamReader::processDsfBlocks(uint8_t* out, size_t maxBytes) {
 
     size_t totalBytes = groups * blockGroup;
     size_t bytesPerCh = groups * bs;
-    const uint8_t* src = m_dataBuf.data();
+    const uint8_t* src = m_dataBuf.data() + m_dataBufPos;
 
     // Rearrange block-interleaved to fully planar:
     // Input:  [L_blk0][R_blk0][L_blk1][R_blk1]...
@@ -493,7 +492,7 @@ size_t DsdStreamReader::processDsfBlocks(uint8_t* out, size_t maxBytes) {
         }
     }
 
-    m_dataBuf.erase(m_dataBuf.begin(), m_dataBuf.begin() + totalBytes);
+    m_dataBufPos += totalBytes;
     m_totalBytesOutput += totalBytes;
     return totalBytes;
 }
@@ -502,7 +501,7 @@ size_t DsdStreamReader::processDffData(uint8_t* out, size_t maxBytes) {
     // DFF data is byte-interleaved: [L0][R0][L1][R1]...
     // Need to de-interleave to planar: [L0L1...][R0R1...]
 
-    size_t avail = m_dataBuf.size();
+    size_t avail = m_dataBuf.size() - m_dataBufPos;
     if (avail == 0) return 0;
 
     uint32_t ch = m_format.channels;
@@ -513,8 +512,8 @@ size_t DsdStreamReader::processDffData(uint8_t* out, size_t maxBytes) {
     usable = (usable / ch) * ch;
     if (usable == 0) return 0;
 
-    DsdProcessor::deinterleaveToPlaynar(m_dataBuf.data(), out, usable, ch);
-    m_dataBuf.erase(m_dataBuf.begin(), m_dataBuf.begin() + usable);
+    DsdProcessor::deinterleaveToPlaynar(m_dataBuf.data() + m_dataBufPos, out, usable, ch);
+    m_dataBufPos += usable;
     m_totalBytesOutput += usable;
     return usable;
 }
@@ -547,8 +546,14 @@ size_t DsdStreamReader::readPlanar(uint8_t* out, size_t maxBytes) {
             break;
     }
 
+    // Compact buffer periodically to prevent unbounded growth
+    if (m_dataBufPos > 131072) {
+        m_dataBuf.erase(m_dataBuf.begin(), m_dataBuf.begin() + m_dataBufPos);
+        m_dataBufPos = 0;
+    }
+
     // Check if we're done
-    if (result == 0 && m_dataBuf.empty()) {
+    if (result == 0 && availableBytes() == 0) {
         if (m_eof) {
             m_finished = true;
             m_state = State::DONE;
