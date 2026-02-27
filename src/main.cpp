@@ -10,6 +10,8 @@
 #include "SlimprotoClient.h"
 #include "HttpStreamClient.h"
 #include "Decoder.h"
+#include "DsdStreamReader.h"
+#include "DsdProcessor.h"
 #include "DirettaSync.h"
 #include "LogLevel.h"
 
@@ -434,6 +436,246 @@ int main(int argc, char* argv[]) {
                 audioTestRunning.store(true);
                 audioThreadDone.store(false, std::memory_order_release);
                 audioTestThread = std::thread([&httpStream, &slimproto, &audioTestRunning, &audioThreadDone, formatCode, pcmRate, pcmSize, pcmChannels, pcmEndian, direttaPtr]() {
+
+                    // ============================================================
+                    // DSD PATH — separate from PCM/FLAC
+                    // ============================================================
+                    if (formatCode == FORMAT_DSD) {
+                        auto dsdReader = std::make_unique<DsdStreamReader>();
+
+                        // Set raw DSD format hint from strm params (fallback for raw DSD)
+                        uint32_t hintRate = sampleRateFromCode(pcmRate);
+                        uint32_t hintCh = (pcmChannels == '2') ? 2
+                                        : (pcmChannels == '1') ? 1 : 2;
+                        if (hintRate > 0) {
+                            dsdReader->setRawDsdFormat(hintRate, hintCh);
+                        }
+
+                        slimproto->sendStat(StatEvent::STMs);
+
+                        uint8_t httpBuf[65536];
+                        uint64_t totalBytes = 0;
+                        bool formatLogged = false;
+                        uint64_t lastElapsedLog = 0;
+
+                        // DSD cache: planar uint8_t buffer
+                        constexpr size_t DSD_CACHE_MAX_BYTES = 1048576;  // 1MB
+                        std::vector<uint8_t> dsdCache;
+                        size_t dsdCachePos = 0;
+
+                        constexpr size_t DSD_READ_CHUNK = 65536;
+                        uint8_t dsdReadBuf[DSD_READ_CHUNK];
+
+                        constexpr unsigned int PREBUFFER_MS = 500;
+                        uint64_t pushedDsdBytes = 0;
+                        bool direttaOpened = false;
+                        AudioFormat audioFmt{};
+                        uint32_t detectedChannels = 2;
+                        uint32_t dsdBitRate = 0;
+
+                        auto cacheBytes = [&]() -> size_t {
+                            return dsdCache.size() - dsdCachePos;
+                        };
+
+                        bool httpEof = false;
+                        while (audioTestRunning.load(std::memory_order_acquire) &&
+                               (!httpEof || cacheBytes() > 0)) {
+
+                            // === PHASE 1a: HTTP read ===
+                            bool gotData = false;
+                            if (dsdCache.size() - dsdCachePos < DSD_CACHE_MAX_BYTES && !httpEof) {
+                                if (httpStream->isConnected()) {
+                                    ssize_t n = httpStream->readWithTimeout(httpBuf, sizeof(httpBuf), 2);
+                                    if (n > 0) {
+                                        gotData = true;
+                                        totalBytes += n;
+                                        slimproto->updateStreamBytes(totalBytes);
+                                        dsdReader->feed(httpBuf, static_cast<size_t>(n));
+                                    } else if (n < 0 || !httpStream->isConnected()) {
+                                        httpEof = true;
+                                        dsdReader->setEof();
+                                    }
+                                } else {
+                                    httpEof = true;
+                                    dsdReader->setEof();
+                                }
+                            }
+
+                            // === PHASE 1b: Drain DsdStreamReader into cache ===
+                            if (dsdCache.size() - dsdCachePos < DSD_CACHE_MAX_BYTES) {
+                                while (true) {
+                                    size_t bytes = dsdReader->readPlanar(dsdReadBuf, DSD_READ_CHUNK);
+                                    if (bytes == 0) break;
+                                    dsdCache.insert(dsdCache.end(), dsdReadBuf, dsdReadBuf + bytes);
+                                }
+                            }
+
+                            // === PHASE 2: Format detection ===
+                            if (!formatLogged && dsdReader->isFormatReady()) {
+                                formatLogged = true;
+                                const auto& fmt = dsdReader->getFormat();
+                                dsdBitRate = fmt.sampleRate;
+                                detectedChannels = fmt.channels;
+
+                                audioFmt.sampleRate = dsdBitRate;
+                                audioFmt.bitDepth = 1;
+                                audioFmt.channels = detectedChannels;
+                                audioFmt.isDSD = true;
+                                audioFmt.dsdFormat = (fmt.container == DsdFormat::Container::DFF)
+                                    ? AudioFormat::DSDFormat::DFF
+                                    : AudioFormat::DSDFormat::DSF;
+                            }
+
+                            // === PHASE 3: Prebuffer ===
+                            if (formatLogged && !direttaOpened) {
+                                uint64_t byteRateTotal = (static_cast<uint64_t>(dsdBitRate) / 8) * detectedChannels;
+                                size_t targetBytes = static_cast<size_t>(byteRateTotal * PREBUFFER_MS / 1000);
+
+                                if (cacheBytes() >= targetBytes || httpEof) {
+                                    size_t prebufBytes = cacheBytes();
+                                    if (prebufBytes == 0) continue;
+
+                                    if (!direttaPtr->open(audioFmt)) {
+                                        LOG_ERROR("[Audio] Failed to open Diretta for DSD");
+                                        slimproto->sendStat(StatEvent::STMn);
+                                        audioThreadDone.store(true, std::memory_order_release);
+                                        return;
+                                    }
+
+                                    uint32_t prebufMs = byteRateTotal > 0
+                                        ? static_cast<uint32_t>(prebufBytes * 1000 / byteRateTotal) : 0;
+                                    LOG_INFO("[Audio] DSD pre-buffered " << prebufBytes
+                                             << " bytes (" << prebufMs << "ms)");
+
+                                    // Flush prebuffer at full speed
+                                    const uint8_t* ptr = dsdCache.data() + dsdCachePos;
+                                    size_t remaining = prebufBytes;
+                                    while (remaining > 0 &&
+                                           audioTestRunning.load(std::memory_order_relaxed)) {
+                                        size_t chunk = std::min(remaining, DSD_READ_CHUNK);
+                                        // Align to channels * 4
+                                        chunk = (chunk / (detectedChannels * 4)) * (detectedChannels * 4);
+                                        if (chunk == 0) break;
+                                        size_t numSamples = (chunk * 8) / detectedChannels;
+                                        direttaPtr->sendAudio(ptr, numSamples);
+                                        ptr += chunk;
+                                        remaining -= chunk;
+                                    }
+                                    dsdCachePos += prebufBytes;
+                                    pushedDsdBytes += prebufBytes;
+                                    direttaOpened = true;
+                                    slimproto->sendStat(StatEvent::STMl);
+                                }
+                                continue;
+                            }
+
+                            // === PHASE 4: Push DSD to DirettaSync ===
+                            if (direttaOpened && cacheBytes() > 0) {
+                                if (direttaPtr->isPaused()) {
+                                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                                } else if (direttaPtr->getBufferLevel() <= 0.95f) {
+                                    size_t push = std::min(cacheBytes(), DSD_READ_CHUNK);
+                                    push = (push / (detectedChannels * 4)) * (detectedChannels * 4);
+                                    if (push > 0) {
+                                        size_t numSamples = (push * 8) / detectedChannels;
+                                        direttaPtr->sendAudio(
+                                            dsdCache.data() + dsdCachePos, numSamples);
+                                        dsdCachePos += push;
+                                        pushedDsdBytes += push;
+                                    }
+                                } else {
+                                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                                }
+                            }
+
+                            // === PHASE 5: Update elapsed time ===
+                            if (direttaOpened && dsdBitRate > 0) {
+                                uint64_t bytesPerSec = (static_cast<uint64_t>(dsdBitRate) / 8) * detectedChannels;
+                                uint64_t totalMs = (pushedDsdBytes * 1000) / bytesPerSec;
+                                uint32_t elapsedSec = static_cast<uint32_t>(totalMs / 1000);
+                                uint32_t elapsedMs = static_cast<uint32_t>(totalMs);
+                                slimproto->updateElapsed(elapsedSec, elapsedMs);
+
+                                if (elapsedSec >= lastElapsedLog + 10) {
+                                    lastElapsedLog = elapsedSec;
+                                    LOG_DEBUG("[Audio] DSD elapsed: " << elapsedSec << "s"
+                                              << " (" << pushedDsdBytes << " bytes pushed)"
+                                              << " cache=" << cacheBytes() << "b");
+                                }
+                            }
+
+                            // === PHASE 6: Compact cache ===
+                            if (dsdCachePos > 100000) {
+                                dsdCache.erase(dsdCache.begin(),
+                                    dsdCache.begin() + dsdCachePos);
+                                dsdCachePos = 0;
+                            }
+
+                            // === PHASE 7: Anti-busy-loop ===
+                            if (!gotData && cacheBytes() == 0 && !httpEof) {
+                                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                            }
+
+                            if (dsdReader->hasError()) {
+                                LOG_ERROR("[Audio] DSD stream reader error");
+                                break;
+                            }
+                        }
+
+                        // === DRAIN ===
+                        dsdReader->setEof();
+                        while (!dsdReader->isFinished() && !dsdReader->hasError() &&
+                               audioTestRunning.load(std::memory_order_acquire)) {
+                            size_t bytes = dsdReader->readPlanar(dsdReadBuf, DSD_READ_CHUNK);
+                            if (bytes == 0) break;
+                            dsdCache.insert(dsdCache.end(), dsdReadBuf, dsdReadBuf + bytes);
+                        }
+
+                        // Push remaining cache
+                        while (direttaOpened && cacheBytes() > 0 &&
+                               audioTestRunning.load(std::memory_order_acquire)) {
+                            while (audioTestRunning.load(std::memory_order_acquire)) {
+                                if (direttaPtr->isPaused()) {
+                                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                                    continue;
+                                }
+                                if (direttaPtr->getBufferLevel() > 0.95f) {
+                                    std::unique_lock<std::mutex> lock(direttaPtr->getFlowMutex());
+                                    direttaPtr->waitForSpace(lock, std::chrono::milliseconds(5));
+                                    continue;
+                                }
+                                break;
+                            }
+                            size_t push = std::min(cacheBytes(), DSD_READ_CHUNK);
+                            push = (push / (detectedChannels * 4)) * (detectedChannels * 4);
+                            if (push == 0) break;
+                            size_t numSamples = (push * 8) / detectedChannels;
+                            direttaPtr->sendAudio(dsdCache.data() + dsdCachePos, numSamples);
+                            dsdCachePos += push;
+                            pushedDsdBytes += push;
+
+                            if (dsdBitRate > 0) {
+                                uint64_t bytesPerSec = (static_cast<uint64_t>(dsdBitRate) / 8) * detectedChannels;
+                                uint64_t totalMs = (pushedDsdBytes * 1000) / bytesPerSec;
+                                slimproto->updateElapsed(
+                                    static_cast<uint32_t>(totalMs / 1000),
+                                    static_cast<uint32_t>(totalMs));
+                            }
+                        }
+
+                        LOG_INFO("[Audio] DSD stream complete: " << totalBytes << " bytes received, "
+                                 << pushedDsdBytes << " DSD bytes pushed");
+
+                        slimproto->sendStat(StatEvent::STMd);
+                        slimproto->sendStat(StatEvent::STMu);
+                        audioThreadDone.store(true, std::memory_order_release);
+                        return;
+                    }
+
+                    // ============================================================
+                    // PCM/FLAC PATH
+                    // ============================================================
+
                     // Create decoder for this format
                     auto decoder = Decoder::create(formatCode);
                     if (!decoder) {

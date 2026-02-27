@@ -327,6 +327,7 @@ set(SLIM2DIRETTA_SOURCES
     src/FlacDecoder.cpp
     src/PcmDecoder.cpp
     src/DsdProcessor.cpp
+    src/DsdStreamReader.cpp
     diretta/DirettaSync.cpp
     diretta/globals.cpp
 )
