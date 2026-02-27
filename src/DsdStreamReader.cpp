@@ -441,11 +441,15 @@ bool DsdStreamReader::parseDffHeader() {
 // ============================================================
 
 size_t DsdStreamReader::processDsfBlocks(uint8_t* out, size_t maxBytes) {
-    // DSF block structure: [blockSize bytes L][blockSize bytes R][blockSize L][blockSize R]...
+    // DSF block structure: [blockSize L][blockSize R][blockSize L][blockSize R]...
     // One block group = blockSizePerChannel * channels bytes
-    // Each block group is already planar: [L block][R block]
+    //
+    // DirettaSync expects FULLY planar: [all L bytes][all R bytes]
+    // So we must rearrange: collect all L blocks first, then all R blocks.
 
-    uint32_t blockGroup = m_format.blockSizePerChannel * m_format.channels;
+    uint32_t bs = m_format.blockSizePerChannel;
+    uint32_t ch = m_format.channels;
+    uint32_t blockGroup = bs * ch;
     if (blockGroup == 0) return 0;
 
     size_t avail = m_dataBuf.size();
@@ -456,10 +460,16 @@ size_t DsdStreamReader::processDsfBlocks(uint8_t* out, size_t maxBytes) {
     if (groups == 0) {
         // At EOF, handle partial last block group
         if (m_eof && avail > 0 && m_dataRemaining == 0) {
-            // Partial block at end — align to channels
-            size_t usable = (avail / m_format.channels) * m_format.channels;
-            if (usable > maxBytes) usable = (maxBytes / m_format.channels) * m_format.channels;
+            // Partial block — treat each channel's portion separately
+            size_t bytesPerCh = avail / ch;
+            if (bytesPerCh == 0) return 0;
+            size_t usable = bytesPerCh * ch;
+            if (usable > maxBytes) {
+                bytesPerCh = (maxBytes / ch);
+                usable = bytesPerCh * ch;
+            }
             if (usable == 0) return 0;
+            // For partial block, data is [partial L][partial R] — already planar
             std::memcpy(out, m_dataBuf.data(), usable);
             m_dataBuf.erase(m_dataBuf.begin(), m_dataBuf.begin() + usable);
             m_totalBytesOutput += usable;
@@ -468,12 +478,24 @@ size_t DsdStreamReader::processDsfBlocks(uint8_t* out, size_t maxBytes) {
         return 0;
     }
 
-    size_t bytes = groups * blockGroup;
-    // DSF blocks are already planar — direct copy
-    std::memcpy(out, m_dataBuf.data(), bytes);
-    m_dataBuf.erase(m_dataBuf.begin(), m_dataBuf.begin() + bytes);
-    m_totalBytesOutput += bytes;
-    return bytes;
+    size_t totalBytes = groups * blockGroup;
+    size_t bytesPerCh = groups * bs;
+    const uint8_t* src = m_dataBuf.data();
+
+    // Rearrange block-interleaved to fully planar:
+    // Input:  [L_blk0][R_blk0][L_blk1][R_blk1]...
+    // Output: [L_blk0][L_blk1]...[R_blk0][R_blk1]...
+    for (size_t g = 0; g < groups; g++) {
+        for (uint32_t c = 0; c < ch; c++) {
+            std::memcpy(out + c * bytesPerCh + g * bs,
+                        src + g * blockGroup + c * bs,
+                        bs);
+        }
+    }
+
+    m_dataBuf.erase(m_dataBuf.begin(), m_dataBuf.begin() + totalBytes);
+    m_totalBytesOutput += totalBytes;
+    return totalBytes;
 }
 
 size_t DsdStreamReader::processDffData(uint8_t* out, size_t maxBytes) {
