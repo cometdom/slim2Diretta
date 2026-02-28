@@ -263,7 +263,7 @@ Config parseArguments(int argc, char* argv[]) {
                       << "  --mtu <bytes>              MTU override (default: auto)\n"
                       << "\n"
                       << "Audio:\n"
-                      << "  --max-rate <hz>        Max sample rate (default: 768000)\n"
+                      << "  --max-rate <hz>        Max sample rate (default: 1536000)\n"
                       << "  --no-dsd               Disable DSD support\n"
                       << "\n"
                       << "Logging:\n"
@@ -775,8 +775,8 @@ int main(int argc, char* argv[]) {
                     // When DirettaSync buffer is full (flow control), we still read
                     // HTTP and decode into this cache. This prevents TCP starvation
                     // that caused underruns with bursty Qobuz streams.
-                    // Max ~2s at 192kHz stereo = 768K samples
-                    constexpr size_t DECODE_CACHE_MAX_SAMPLES = 768000;
+                    // Max ~1s at 1536kHz stereo = 3072K samples
+                    constexpr size_t DECODE_CACHE_MAX_SAMPLES = 3072000;
                     std::vector<int32_t> decodeCache;
                     size_t decodeCachePos = 0;  // Read position (samples consumed)
 

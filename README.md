@@ -64,7 +64,7 @@ Both tools share the same **DirettaSync v2.0** engine for Diretta output.
 - **Simplified setup**: Single binary, no Squeezelite to patch and compile
 - **Native DSD playback**: DSF, DFF, and DoP (Roon) to native DSD
 - **Bit-perfect streaming**: Bypasses OS audio stack entirely
-- **High-resolution PCM**: Up to 768kHz/32-bit
+- **High-resolution PCM**: Up to 1536kHz/32-bit
 - **Low latency**: DirettaSync v2.0 with lock-free ring buffers and SIMD
 - **LMS + Roon compatible**: Works with both servers simultaneously (different instances)
 
@@ -130,7 +130,7 @@ Both tools share the same **DirettaSync v2.0** engine for Diretta output.
 - **Ogg Vorbis**: Decoding via libvorbisfile (internet radio, streaming)
 - **PCM**: WAV, AIFF containers + raw PCM (Roon)
 - **Native DSD**: DSF (LSB-first) and DFF/DSDIFF (MSB-first)
-- **DSD rates**: DSD64, DSD128, DSD256, DSD512
+- **DSD rates**: DSD64, DSD128, DSD256, DSD512, DSD1024
 - **DoP**: Automatic detection and conversion to native DSD (Roon compatibility)
 - **Bit-perfect**: Volume forced to 100%, no processing
 
@@ -139,7 +139,7 @@ Both tools share the same **DirettaSync v2.0** engine for Diretta output.
 - **DoP auto-detection**: Transparent conversion from PCM-wrapped DSD (Roon)
 - **Container parsing**: DSF and DFF headers parsed in-stream
 - **Dynamic conversion**: Planar, bit-reverse, byte-swap as needed by DAC
-- **All rates**: DSD64 (2.8MHz) to DSD512 (22.6MHz)
+- **All rates**: DSD64 (2.8MHz) to DSD1024 (45.2MHz)
 
 ### Low-Latency Architecture
 - **DirettaSync v2.0**: Shared with squeeze2diretta and DirettaRendererUPnP
@@ -387,6 +387,8 @@ Options:
   -q, --quiet                    Quiet mode (warnings and errors only)
   --list-targets                 List available Diretta targets and exit
   --version                      Show version and exit
+  --max-rate <hz>                Max PCM sample rate (default: 1536000)
+  --no-dsd                       Disable DSD support
 
 Diretta Advanced Options:
   --transfer-mode <mode>         Transfer scheduling mode (default: auto)

@@ -211,6 +211,7 @@ static_assert(sizeof(StatPayload) == 53, "StatPayload must be 53 bytes");
 
 inline uint32_t sampleRateFromCode(char code) {
     // Matches squeezelite pcm_sample_rate[] array (indexed by code - '0')
+    // Extended rates ('?' and above) for modern LMS with hi-res support
     switch (code) {
         case '0': return 11025;
         case '1': return 22050;
@@ -227,7 +228,11 @@ inline uint32_t sampleRateFromCode(char code) {
         case '<': return 192000;
         case '=': return 352800;
         case '>': return 384000;
-        default:  return 0;  // '?' = self-describing
+        case '?': return 705600;
+        case '@': return 768000;
+        case 'A': return 1411200;
+        case 'B': return 1536000;
+        default:  return 0;  // self-describing (decoder reads from headers)
     }
 }
 

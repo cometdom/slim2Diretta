@@ -28,7 +28,7 @@ struct Config {
     unsigned int targetProfileLimitTime = 200; // 0=SelfProfile, >0=TargetProfile(µs)
 
     // Audio
-    int maxSampleRate = 768000;
+    int maxSampleRate = 1536000;
     bool dsdEnabled = true;
 
     // Logging

@@ -24,6 +24,11 @@ All notable changes to slim2diretta are documented in this file.
   - Transparent re-acquisition on next play command from LMS/Roon
   - Allows DirettaRendererUPnP or other Diretta hosts to use the same target
 
+- **Extended sample rate support**: PCM up to 1536kHz, DSD up to DSD1024
+  - `MaxSampleRate` reported to LMS raised from 768kHz to 1536kHz
+  - Extended Slimproto sample rate table: 705.6kHz, 768kHz, 1411.2kHz, 1536kHz
+  - DSD1024 (45.2MHz) support (already handled by decoder, now documented)
+
 - **SDK improvements**:
   - Changed from `MSMODE_MS3` to `MSMODE_AUTO` for better device compatibility
   - Correct info cycle parameter passed to `DIRETTA::Sync::open()` (was using cycle time)
