@@ -405,7 +405,25 @@ setup_systemd_service() {
         sudo cp "$SCRIPT_DIR/slim2diretta.default" "$CONFIG_FILE"
         print_success "Configuration file installed: $CONFIG_FILE"
     else
-        print_info "Configuration file already exists, keeping current settings"
+        # Check if the shipped default has changed (new options, etc.)
+        if ! diff -q "$SCRIPT_DIR/slim2diretta.default" "$CONFIG_FILE" > /dev/null 2>&1; then
+            print_warning "Configuration file has changed in this version"
+            echo ""
+            echo "  New options may be available (Diretta advanced tuning, etc.)"
+            echo "  Your current file: $CONFIG_FILE"
+            echo ""
+            if confirm "Update configuration file? (old file backed up as .bak)"; then
+                sudo cp "$CONFIG_FILE" "${CONFIG_FILE}.bak"
+                sudo cp "$SCRIPT_DIR/slim2diretta.default" "$CONFIG_FILE"
+                print_success "Configuration updated (backup: ${CONFIG_FILE}.bak)"
+                print_info "Review and re-apply your custom settings from the backup"
+            else
+                print_info "Keeping current configuration"
+                print_info "New default available at: $SCRIPT_DIR/slim2diretta.default"
+            fi
+        else
+            print_info "Configuration file is up to date"
+        fi
     fi
 
     print_info "4. Reloading systemd daemon..."
