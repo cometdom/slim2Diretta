@@ -19,7 +19,7 @@ struct Config {
     // Diretta
     int direttaTarget = -1;             // -1 = not set (required)
     int threadMode = 1;                 // SDK thread priority mode
-    unsigned int cycleTime = 2620;      // microseconds between packets
+    unsigned int cycleTime = 10000;     // microseconds between packets
     bool cycleTimeAuto = true;          // compute from MTU + format
     unsigned int mtu = 0;               // 0 = auto-detect
     std::string transferMode;           // "auto","varmax","varauto","fixauto","random" (empty=auto)

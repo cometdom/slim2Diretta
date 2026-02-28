@@ -389,12 +389,12 @@ Options:
   --version                      Show version and exit
 
 Diretta Advanced Options:
-  --transfer-mode <mode>         Transfer mode: auto, varmax, varauto, fixauto, random
-  --info-cycle <us>              Info packet cycle in microseconds (default: 100000)
-  --cycle-min-time <us>          Min cycle time in microseconds (random mode only)
+  --transfer-mode <mode>         Transfer scheduling mode (default: auto)
+  --info-cycle <us>              Info packet cycle time in us (default: 100000)
+  --cycle-time <us>              Transfer packet cycle max time in us (default: 10000)
+  --cycle-min-time <us>          Transfer packet cycle min time in us (random mode only)
   --target-profile-limit <us>    Target profile limit (0=self, default: 200)
-  --thread-mode <mode>           SDK thread priority mode (default: 1)
-  --cycle-time <us>              Cycle time in microseconds (default: 2620)
+  --thread-mode <bitmask>        SDK thread mode bitmask (default: 1)
   --mtu <bytes>                  MTU size (default: auto-detect)
 ```
 
@@ -421,6 +421,67 @@ The target number is set by the systemd instance name:
 systemctl start slim2diretta@1    # --target 1
 systemctl start slim2diretta@2    # --target 2
 ```
+
+### Diretta Advanced Tuning
+
+These options control the low-level behavior of the Diretta SDK transport layer. Default values work well for most systems — only change them if you understand the implications.
+
+#### Transfer Mode (`--transfer-mode`)
+
+Controls how audio packets are scheduled for transmission.
+
+| Mode | Description |
+|------|-------------|
+| `auto` | SDK chooses automatically (default) |
+| `varauto` | Flex cycle mode — adaptive packet timing |
+| `varmax` | Flex cycle mode — packets filled to maximum |
+| `fixauto` | Fixed cycle mode — constant packet timing |
+| `random` | Random cycle mode — use with `--cycle-min-time` |
+
+#### Cycle Time (`--cycle-time` / `--cycle-min-time`)
+
+- **`--cycle-time <us>`**: Transfer packet cycle maximum time in microseconds (default: 10000). This is the maximum interval between packet transmissions.
+- **`--cycle-min-time <us>`**: Transfer packet cycle minimum time in microseconds. Only used with `random` transfer mode, defines the lower bound of the random interval.
+
+#### Info Cycle (`--info-cycle`)
+
+Information packet cycle time in microseconds (default: 100000 = 100ms). Controls how often the SDK exchanges status information with the Diretta target.
+
+#### Target Profile (`--target-profile-limit`)
+
+Controls how the SDK profiles and adapts to system performance.
+
+| Value | Behavior |
+|-------|----------|
+| `0` | **SelfProfile** — host-side profiling only |
+| `> 0` | **TargetProfile** — with limit in microseconds (default: 200) |
+
+With TargetProfile, the SDK automatically adapts to your system's capabilities. If Diretta detects high load (dropped packets), it falls back to lighter processing to maintain stable streaming.
+
+#### Thread Mode (`--thread-mode`)
+
+Bitmask controlling SDK thread behavior. Combine flags by adding their values.
+
+| Value | Flag | Description |
+|-------|------|-------------|
+| 1 | Critical | High priority thread scheduling |
+| 2 | NoShortSleep | Disable short sleep intervals |
+| 4 | NoSleep4Core | No sleep on 4+ core systems |
+| 8 | SocketNoBlock | Non-blocking socket mode |
+| 16 | OccupiedCPU | CPU occupation mode (busy-wait) |
+| 32 | Feedback | Moving average feedback (level 1) |
+| 64 | Feedback | Moving average feedback (level 2) |
+| 128 | Feedback | Moving average feedback (level 3) |
+| 256 | NoFastFeedback | Disable fast feedback |
+| 512 | IdleOne | Idle on one core |
+| 1024 | IdleAll | Idle on all cores |
+| 2048 | NoSleepForce | Force no-sleep mode |
+| 4096 | LimitResend | Limit packet resend |
+| 8192 | NoJumboFrame | Disable jumbo frame support |
+| 16384 | NoFirewall | Bypass firewall detection |
+| 32768 | NoRawSocket | Disable raw socket usage |
+
+**Examples**: `--thread-mode 1` (Critical only, default), `--thread-mode 3` (Critical + NoShortSleep), `--thread-mode 5` (Critical + NoSleep4Core).
 
 ---
 
