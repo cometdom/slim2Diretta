@@ -15,5 +15,17 @@
 # Verbose + player name + auto-discovery:
 #SLIM2DIRETTA_OPTS="-n Living Room -v"
 #
+# Diretta advanced options (defaults shown):
+#   --transfer-mode <mode>         auto, varmax, varauto, fixauto, random
+#   --info-cycle <us>              Info packet cycle (default: 100000)
+#   --cycle-min-time <us>          Min cycle time for random mode
+#   --target-profile-limit <us>    0=SelfProfile, default: 200
+#   --thread-mode <mode>           SDK thread priority bitmask (default: 1)
+#   --cycle-time <us>              Cycle time in microseconds (default: auto)
+#   --mtu <bytes>                  MTU override (default: auto-detect)
+#
+# Example with Diretta tuning:
+#SLIM2DIRETTA_OPTS="-s 192.168.1.100 -n Living Room --transfer-mode fixauto"
+#
 # Default: auto-discover LMS, default player name
 SLIM2DIRETTA_OPTS=""

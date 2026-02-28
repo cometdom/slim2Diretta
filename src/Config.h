@@ -22,6 +22,10 @@ struct Config {
     unsigned int cycleTime = 2620;      // microseconds between packets
     bool cycleTimeAuto = true;          // compute from MTU + format
     unsigned int mtu = 0;               // 0 = auto-detect
+    std::string transferMode;           // "auto","varmax","varauto","fixauto","random" (empty=auto)
+    unsigned int infoCycle = 100000;    // Info packet cycle µs (default 100ms)
+    unsigned int cycleMinTime = 0;      // Min cycle for RANDOM mode (0 = unused)
+    unsigned int targetProfileLimitTime = 200; // 0=SelfProfile, >0=TargetProfile(µs)
 
     // Audio
     int maxSampleRate = 768000;

@@ -31,7 +31,7 @@
 #include <unistd.h>
 #include <poll.h>
 
-#define SLIM2DIRETTA_VERSION "0.2.0"
+#define SLIM2DIRETTA_VERSION "1.0.0"
 
 // ============================================
 // Async Logging Infrastructure
@@ -201,6 +201,24 @@ Config parseArguments(int argc, char* argv[]) {
         else if (arg == "--mtu" && i + 1 < argc) {
             config.mtu = static_cast<unsigned int>(std::atoi(argv[++i]));
         }
+        else if (arg == "--transfer-mode" && i + 1 < argc) {
+            config.transferMode = argv[++i];
+            if (config.transferMode != "auto" && config.transferMode != "varmax" &&
+                config.transferMode != "varauto" && config.transferMode != "fixauto" &&
+                config.transferMode != "random") {
+                std::cerr << "Invalid transfer-mode. Use: auto, varmax, varauto, fixauto, random" << std::endl;
+                exit(1);
+            }
+        }
+        else if (arg == "--info-cycle" && i + 1 < argc) {
+            config.infoCycle = static_cast<unsigned int>(std::atoi(argv[++i]));
+        }
+        else if (arg == "--cycle-min-time" && i + 1 < argc) {
+            config.cycleMinTime = static_cast<unsigned int>(std::atoi(argv[++i]));
+        }
+        else if (arg == "--target-profile-limit" && i + 1 < argc) {
+            config.targetProfileLimitTime = static_cast<unsigned int>(std::atoi(argv[++i]));
+        }
         else if (arg == "--max-rate" && i + 1 < argc) {
             config.maxSampleRate = std::atoi(argv[++i]);
         }
@@ -231,9 +249,16 @@ Config parseArguments(int argc, char* argv[]) {
                       << "Diretta:\n"
                       << "  -t, --target <index>   Diretta target index (1, 2, 3...)\n"
                       << "  -l, --list-targets     List available targets and exit\n"
-                      << "  --thread-mode <mode>   SDK thread mode (default: 1)\n"
-                      << "  --cycle-time <us>      Cycle time in microseconds (default: auto)\n"
-                      << "  --mtu <bytes>          MTU override (default: auto)\n"
+                      << "  --thread-mode <mode>       SDK thread mode bitmask (default: 1=CRITICAL)\n"
+                      << "                             Flags: 1=CRITICAL, 2=NOSHORTSLEEP, 4=NOSLEEP4CORE,\n"
+                      << "                             8=SOCKETNOBLOCK, 16=OCCUPIED, 2048=NOSLEEPFORCE,\n"
+                      << "                             8192=NOJUMBOFRAME, 16384=NOFIREWALL, 32768=NORAWSOCKET\n"
+                      << "  --cycle-time <us>          Cycle time in microseconds (default: auto)\n"
+                      << "  --mtu <bytes>              MTU override (default: auto)\n"
+                      << "  --transfer-mode <mode>     Transfer mode: auto, varmax, varauto, fixauto, random\n"
+                      << "  --info-cycle <us>          Info packet cycle in microseconds (default: 100000)\n"
+                      << "  --cycle-min-time <us>      Min cycle time in microseconds (random mode only)\n"
+                      << "  --target-profile-limit <us> Target profile limit (0=self, default: 200)\n"
                       << "\n"
                       << "Audio:\n"
                       << "  --max-rate <hz>        Max sample rate (default: 768000)\n"
@@ -387,6 +412,21 @@ int main(int argc, char* argv[]) {
     direttaConfig.cycleTime = config.cycleTime;
     direttaConfig.cycleTimeAuto = config.cycleTimeAuto;
     if (config.mtu > 0) direttaConfig.mtu = config.mtu;
+    direttaConfig.infoCycle = config.infoCycle;
+    direttaConfig.cycleMinTime = config.cycleMinTime;
+    direttaConfig.targetProfileLimitTime = config.targetProfileLimitTime;
+    if (!config.transferMode.empty()) {
+        if (config.transferMode == "varmax")
+            direttaConfig.transferMode = DirettaTransferMode::VAR_MAX;
+        else if (config.transferMode == "varauto")
+            direttaConfig.transferMode = DirettaTransferMode::VAR_AUTO;
+        else if (config.transferMode == "fixauto")
+            direttaConfig.transferMode = DirettaTransferMode::FIX_AUTO;
+        else if (config.transferMode == "random")
+            direttaConfig.transferMode = DirettaTransferMode::RANDOM;
+        else
+            direttaConfig.transferMode = DirettaTransferMode::AUTO;
+    }
 
     if (!diretta->enable(direttaConfig)) {
         std::cerr << "Failed to enable Diretta target #" << config.direttaTarget << std::endl;
@@ -408,11 +448,24 @@ int main(int argc, char* argv[]) {
     std::atomic<bool> audioTestRunning{false};
     std::atomic<bool> audioThreadDone{true};  // true when no thread is running
 
+    // Idle release: release Diretta target after inactivity so other apps can use it
+    constexpr int IDLE_RELEASE_TIMEOUT_S = 5;
+    std::atomic<bool> direttaReleased{false};
+    std::chrono::steady_clock::time_point lastStopTime{};
+    std::atomic<bool> idleTimerActive{false};
+
     // Register stream callback
     slimproto->onStream([&](const StrmCommand& cmd, const std::string& httpRequest) {
         switch (cmd.command) {
             case STRM_START: {
                 LOG_INFO("Stream start requested (format=" << cmd.format << ")");
+
+                // Cancel idle release timer and mark target as active
+                idleTimerActive.store(false, std::memory_order_release);
+                if (direttaReleased.load(std::memory_order_acquire)) {
+                    LOG_INFO("Re-acquiring Diretta target...");
+                    direttaReleased.store(false, std::memory_order_release);
+                }
 
                 // Stop previous playback
                 if (direttaPtr->isPlaying()) {
@@ -1079,6 +1132,9 @@ int main(int argc, char* argv[]) {
                 httpStream->disconnect();
                 if (direttaPtr->isPlaying()) direttaPtr->stopPlayback(true);
                 slimproto->sendStat(StatEvent::STMf);  // Flushed
+                // Start idle release timer
+                lastStopTime = std::chrono::steady_clock::now();
+                idleTimerActive.store(true, std::memory_order_release);
                 break;
 
             case STRM_PAUSE:
@@ -1099,6 +1155,9 @@ int main(int argc, char* argv[]) {
                 httpStream->disconnect();
                 if (direttaPtr->isPlaying()) direttaPtr->stopPlayback(true);
                 slimproto->sendStat(StatEvent::STMf);
+                // Start idle release timer
+                lastStopTime = std::chrono::steady_clock::now();
+                idleTimerActive.store(true, std::memory_order_release);
                 break;
 
             default:
@@ -1187,6 +1246,19 @@ int main(int argc, char* argv[]) {
         // Wait for shutdown signal or connection loss
         while (g_running.load(std::memory_order_acquire) && slimproto->isConnected()) {
             std::this_thread::sleep_for(std::chrono::seconds(1));
+
+            // Auto-release Diretta target after idle timeout
+            if (idleTimerActive.load(std::memory_order_acquire) &&
+                !direttaReleased.load(std::memory_order_acquire)) {
+                auto elapsed = std::chrono::steady_clock::now() - lastStopTime;
+                if (elapsed >= std::chrono::seconds(IDLE_RELEASE_TIMEOUT_S)) {
+                    LOG_INFO("No activity for " << IDLE_RELEASE_TIMEOUT_S
+                             << "s — releasing Diretta target for other sources");
+                    direttaPtr->release();
+                    direttaReleased.store(true, std::memory_order_release);
+                    idleTimerActive.store(false, std::memory_order_release);
+                }
+            }
         }
 
         // Cleanup: stop audio, disconnect slimproto, join thread

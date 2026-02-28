@@ -2,6 +2,38 @@
 
 All notable changes to slim2diretta are documented in this file.
 
+## v1.0.0 (2026-02-28)
+
+### Added
+
+- **ICY metadata handling**: Transparent stripping of ICY metadata from internet radio streams
+  - Automatic detection of `icy-metaint` header in HTTP responses
+  - Metadata blocks filtered out before audio data reaches decoders
+  - Supports both `HTTP/1.x` and `ICY` protocol responses
+
+- **Advanced Diretta SDK options**: Fine-tuning of the Diretta transport layer
+  - `--transfer-mode <mode>`: Transfer scheduling mode (`auto`, `varmax`, `varauto`, `fixauto`, `random`)
+  - `--info-cycle <us>`: Info packet cycle in microseconds (default: 100000)
+  - `--cycle-min-time <us>`: Minimum cycle time for RANDOM mode
+  - `--target-profile-limit <us>`: Target profile limit (0=SelfProfile, default: 200)
+  - RANDOM transfer mode support with configurable min cycle time
+  - TargetProfile / SelfProfile dual-path transfer configuration
+
+- **Auto-release of Diretta target**: Coexistence with other Diretta applications
+  - Automatically releases the Diretta target after 5 seconds of idle
+  - Transparent re-acquisition on next play command from LMS/Roon
+  - Allows DirettaRendererUPnP or other Diretta hosts to use the same target
+
+- **SDK improvements**:
+  - Changed from `MSMODE_MS3` to `MSMODE_AUTO` for better device compatibility
+  - Correct info cycle parameter passed to `DIRETTA::Sync::open()` (was using cycle time)
+
+### Known Limitations
+
+- **Roon radio**: Only FLAC-encoded internet radios work via Roon's Squeezebox emulation. MP3/AAC/OGG radios are not supported by Roon's Slimproto implementation (based on LMS 6.0.x era code). All radio formats work via LMS.
+
+---
+
 ## v0.2.0 - Test Version (2026-02-27)
 
 ### Added

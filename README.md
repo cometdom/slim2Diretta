@@ -1,4 +1,4 @@
-# slim2diretta v0.2.0 (Test Version)
+# slim2diretta v1.0.0
 
 **Native LMS Player with Diretta Output - Mono-Process Architecture**
 
@@ -8,7 +8,7 @@
 
 ---
 
-![Version](https://img.shields.io/badge/version-0.2.0_test-blue.svg)
+![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)
 ![DSD](https://img.shields.io/badge/DSD-Native-green.svg)
 ![SDK](https://img.shields.io/badge/SDK-DIRETTA::Sync-orange.svg)
 
@@ -147,6 +147,8 @@ Both tools share the same **DirettaSync v2.0** engine for Diretta output.
 - **Adaptive prebuffer**: 500ms target with flow control
 - **Quick resume**: Same-format track transitions without full reconnection
 - **Clean transitions**: Silence injection on pause/stop/format changes
+- **Auto-release**: Diretta target released after 5s idle for coexistence with other Diretta hosts
+- **Advanced tuning**: Transfer mode, info cycle, target profile, and thread priority options
 
 ### Slimproto Protocol
 - **Clean-room implementation**: From public documentation (no GPL code copied)
@@ -377,14 +379,23 @@ sudo systemctl enable --now slim2diretta@1
 Usage: slim2diretta [OPTIONS]
 
 Options:
-  -s, --server <ip>       LMS server IP (default: auto-discover)
-  -t, --target <number>   Diretta target number (required)
-  -n, --name <name>       Player name (default: slim2diretta)
-  -m, --mac <mac>         MAC address (default: auto-generated)
-  -v, --verbose           Enable verbose debug output
-  -q, --quiet             Quiet mode (warnings and errors only)
-  --list-targets          List available Diretta targets and exit
-  --version               Show version and exit
+  -s, --server <ip>              LMS server IP (default: auto-discover)
+  -t, --target <number>          Diretta target number (required)
+  -n, --name <name>              Player name (default: slim2diretta)
+  -m, --mac <mac>                MAC address (default: auto-generated)
+  -v, --verbose                  Enable verbose debug output
+  -q, --quiet                    Quiet mode (warnings and errors only)
+  --list-targets                 List available Diretta targets and exit
+  --version                      Show version and exit
+
+Diretta Advanced Options:
+  --transfer-mode <mode>         Transfer mode: auto, varmax, varauto, fixauto, random
+  --info-cycle <us>              Info packet cycle in microseconds (default: 100000)
+  --cycle-min-time <us>          Min cycle time in microseconds (random mode only)
+  --target-profile-limit <us>    Target profile limit (0=self, default: 200)
+  --thread-mode <mode>           SDK thread priority mode (default: 1)
+  --cycle-time <us>              Cycle time in microseconds (default: 2620)
+  --mtu <bytes>                  MTU size (default: auto-detect)
 ```
 
 ### Configuration File (/etc/default/slim2diretta)
@@ -500,6 +511,8 @@ slim2diretta works with **Roon** in Squeezebox emulation mode:
 
 No special configuration needed for Roon. Simply enable Squeezebox support in Roon and slim2diretta will appear as a player.
 
+> **Note on Internet Radio via Roon**: Only FLAC-encoded radio stations work through Roon's Squeezebox emulation. MP3, AAC, and Ogg Vorbis radios are not supported by Roon's Slimproto implementation (based on LMS 6.0.x era code). All radio formats work when using LMS directly.
+
 ---
 
 ## Troubleshooting
@@ -583,4 +596,4 @@ This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) 
 
 **Enjoy native DSD and hi-res PCM streaming from your LMS library!**
 
-*Last updated: 2026-02-27 (v0.2.0 - Test Version)*
+*Last updated: 2026-02-28 (v1.0.0)*
