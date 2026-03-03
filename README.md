@@ -574,7 +574,6 @@ slim2diretta works with **Roon** in Squeezebox emulation mode:
 
 No special configuration needed for Roon. Simply enable Squeezebox support in Roon and slim2diretta will appear as a player.
 
-> **Note on Internet Radio via Roon**: Only FLAC-encoded radio stations work through Roon's Squeezebox emulation. MP3, AAC, and Ogg Vorbis radios are not supported by Roon's Slimproto implementation (based on LMS 6.0.x era code). All radio formats work when using LMS directly.
 
 ---
 
