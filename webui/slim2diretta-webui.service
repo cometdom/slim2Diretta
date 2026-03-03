@@ -7,7 +7,7 @@ Documentation=https://github.com/cometdom/slim2diretta
 Type=simple
 ExecStart=/usr/bin/python3 /opt/slim2diretta/webui/diretta_webui.py \
     --profile /opt/slim2diretta/webui/profiles/slim2diretta.json \
-    --port 8080
+    --port 8081
 Restart=on-failure
 RestartSec=5
 
