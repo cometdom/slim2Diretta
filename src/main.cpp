@@ -800,6 +800,20 @@ int main(int argc, char* argv[]) {
 
                         slimproto->sendStat(StatEvent::STMd);
 
+                        // === GAPLESS: wait for LMS to send next strm-s ===
+                        if (!hasPendingTrack.load(std::memory_order_acquire) &&
+                            audioTestRunning.load(std::memory_order_acquire)) {
+                            LOG_DEBUG("[Gapless] STMd sent, waiting for next track...");
+                            auto waitStart = std::chrono::steady_clock::now();
+                            constexpr int GAPLESS_WAIT_MS = 2000;
+                            while (!hasPendingTrack.load(std::memory_order_acquire) &&
+                                   audioTestRunning.load(std::memory_order_acquire) &&
+                                   std::chrono::duration_cast<std::chrono::milliseconds>(
+                                       std::chrono::steady_clock::now() - waitStart).count() < GAPLESS_WAIT_MS) {
+                                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                            }
+                        }
+
                         // === GAPLESS CHECK: chain to next DSD track? ===
                         if (hasPendingTrack.load(std::memory_order_acquire)) {
                             std::shared_ptr<PendingTrack> next;
@@ -1253,6 +1267,20 @@ int main(int argc, char* argv[]) {
                     }
 
                     slimproto->sendStat(StatEvent::STMd);  // Decoder finished
+
+                    // === GAPLESS: wait for LMS to send next strm-s ===
+                    if (!hasPendingTrack.load(std::memory_order_acquire) &&
+                        audioTestRunning.load(std::memory_order_acquire)) {
+                        LOG_DEBUG("[Gapless] STMd sent, waiting for next track...");
+                        auto waitStart = std::chrono::steady_clock::now();
+                        constexpr int GAPLESS_WAIT_MS = 2000;
+                        while (!hasPendingTrack.load(std::memory_order_acquire) &&
+                               audioTestRunning.load(std::memory_order_acquire) &&
+                               std::chrono::duration_cast<std::chrono::milliseconds>(
+                                   std::chrono::steady_clock::now() - waitStart).count() < GAPLESS_WAIT_MS) {
+                            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                        }
+                    }
 
                     // === GAPLESS CHECK: chain to next PCM/FLAC track? ===
                     if (hasPendingTrack.load(std::memory_order_acquire)) {
