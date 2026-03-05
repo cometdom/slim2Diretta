@@ -674,8 +674,7 @@ int main(int argc, char* argv[]) {
                             // === GAPLESS: stay in loop waiting for next track ===
                             // Keep the loop alive so ring buffer doesn't run empty.
                             // When pending arrives, we break and chain immediately.
-                            if (stmdSent && dsdReader->availableBytes() == 0 &&
-                                dsdReader->isFinished()) {
+                            if (stmdSent && dsdReader->availableBytes() == 0) {
                                 if (hasPendingTrack.load(std::memory_order_acquire)) {
                                     LOG_INFO("[Gapless] DSD pending detected, breaking to chain");
                                     break;  // Got pending → exit loop to chain
