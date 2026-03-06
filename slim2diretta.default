@@ -1,10 +1,11 @@
 # /etc/default/slim2diretta
 # Configuration for slim2diretta systemd service
 #
+# Diretta target index:
+#   Run 'sudo slim2diretta --list-targets' to find available targets.
+TARGET=1
+#
 # Options are appended to the command line.
-# The target index is set by the service instance name:
-#   systemctl start slim2diretta@1    -> --target 1
-#   systemctl start slim2diretta@2    -> --target 2
 #
 # LMS server (omit for auto-discovery):
 #SLIM2DIRETTA_OPTS="-s 192.168.1.100"
@@ -20,7 +21,7 @@
 #   --info-cycle <us>              Info packet cycle time in us (default: 100000)
 #   --cycle-time <us>              Transfer packet cycle max time in us (default: 10000)
 #   --cycle-min-time <us>          Transfer packet cycle min time in us (random mode only)
-#   --target-profile-limit <us>    0=SelfProfile, >0=TargetProfile limit (default: 200)
+#   --target-profile-limit <us>    0=SelfProfile, >0=TargetProfile limit (default: 0)
 #   --thread-mode <bitmask>        SDK thread mode bitmask (default: 1)
 #   --mtu <bytes>                  MTU override (default: auto-detect)
 #
@@ -34,8 +35,8 @@
 # Target profile (--target-profile-limit):
 #   The profile automatically adapts to your system's capabilities.
 #   If Diretta detects high load, it falls back to lighter processing.
-#   0   = SelfProfile (host-side profiling only)
-#   >0  = TargetProfile with limit in microseconds (default: 200)
+#   0   = SelfProfile (host-side profiling only, default, stable)
+#   >0  = TargetProfile with limit in microseconds (experimental)
 #
 # Thread mode (--thread-mode <bitmask>):
 #   Bitmask flags - combine by adding values together.
@@ -64,3 +65,39 @@
 #
 # Default: auto-discover LMS, default player name
 SLIM2DIRETTA_OPTS=""
+
+# ============================================================================
+# PROCESS PRIORITY SETTINGS
+# ============================================================================
+# Control CPU and I/O scheduling priority for the slim2diretta process.
+# Applied by the start-slim2diretta.sh wrapper script via nice/ionice.
+
+# Nice level (-20 = highest priority, 19 = lowest)
+# Default: -10 (high priority, suitable for audio)
+# Recommended values:
+#   -20  = Maximum priority (aggressive, may starve other processes)
+#   -15  = Very high priority
+#   -10  = High priority (default, good balance)
+#    0   = Normal priority
+NICE_LEVEL=-10
+
+# I/O scheduling class
+# Options: realtime, best-effort, idle
+#   realtime    = Highest I/O priority (default, best for audio)
+#   best-effort = Standard I/O priority
+#   idle        = Only when no other I/O is pending
+IO_SCHED_CLASS=realtime
+
+# I/O scheduling priority (0-7, lower = higher priority)
+# Only used with realtime and best-effort classes
+# Default: 0 (highest within class)
+IO_SCHED_PRIORITY=0
+
+# SCHED_FIFO real-time priority for the audio worker thread (1-99)
+# Higher = more priority. Only affects the internal audio streaming thread.
+# Default: 50 (mid-range real-time)
+# Recommended values:
+#   50   = Default (good balance)
+#   80   = High priority (recommended for dedicated audio machines)
+#   99   = Maximum (use with caution, can starve system threads)
+RT_PRIORITY=50

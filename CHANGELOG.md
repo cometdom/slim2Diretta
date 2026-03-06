@@ -2,6 +2,39 @@
 
 All notable changes to slim2diretta are documented in this file.
 
+## v1.1.0 (2026-03-05)
+
+### Added
+
+- **Gapless playback**: Seamless track transitions without audio gaps
+  - PCM/FLAC: gapless chaining with format change detection
+  - DSD (DSF/DFF): gapless chaining with automatic format negotiation
+  - Audio thread stays alive between tracks — no Diretta reconnection needed
+
+- **Seek support**: In-track seeking via LMS progress bar
+  - FLAC: seek to any position (format detection from frame header when STREAMINFO absent)
+  - DSD: seek to any position
+  - Correct thread lifecycle management (seek vs gapless path detection)
+
+- **Web Configuration UI (diretta-webui)**: Browser-based settings interface
+  - Accessible at `http://<ip>:8081` — no SSH needed to configure slim2diretta
+  - Edit all settings: LMS server, player name, verbose mode
+  - Advanced Diretta SDK settings: thread-mode, transfer-mode, cycle-time, info-cycle, target-profile-limit, MTU
+  - Save & Restart: applies settings and restarts the systemd service in one click
+  - Zero dependencies beyond Python 3 (stdlib only)
+  - Separate systemd service (`slim2diretta-webui.service`) — transparent for audio quality
+  - Installable via `install.sh` option 7 or `./install.sh --webui`
+  - Port 8081 to avoid conflict with DirettaRendererUPnP web UI (port 8080)
+
+### Fixed
+
+- **DSF padding silence**: Replace zero-padding in last DSF block with DSD silence (0x69) to eliminate click at track transitions
+- **FLAC seek without header**: Fallback format detection from FLAC frame header when LMS sends seek streams without STREAMINFO metadata
+- **Config parser**: Handle missing `/etc/default/slim2diretta` file (create on first save instead of crash)
+- **Config parser**: Skip duplicate uncommented `SLIM2DIRETTA_OPTS=` lines on save
+
+---
+
 ## v1.0.0 (2026-02-28)
 
 ### Added
@@ -32,10 +65,6 @@ All notable changes to slim2diretta are documented in this file.
 - **SDK improvements**:
   - Changed from `MSMODE_MS3` to `MSMODE_AUTO` for better device compatibility
   - Correct info cycle parameter passed to `DIRETTA::Sync::open()` (was using cycle time)
-
-### Known Limitations
-
-- **Roon radio**: Only FLAC-encoded internet radios work via Roon's Squeezebox emulation. MP3/AAC/OGG radios are not supported by Roon's Slimproto implementation (based on LMS 6.0.x era code). All radio formats work via LMS.
 
 ---
 

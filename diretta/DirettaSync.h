@@ -103,6 +103,7 @@ extern LogRing* g_logRing;
 //=============================================================================
 
 extern bool g_verbose;
+extern int g_rtPriority;
 #include "LogLevel.h"
 
 #ifdef NOLOG
@@ -295,7 +296,7 @@ struct DirettaConfig {
     unsigned int mtuFallback = 1500;
     unsigned int infoCycle = 100000;          // Info packet cycle µs (SDK default: 100ms)
     unsigned int cycleMinTime = 0;            // Min cycle for RANDOM mode (0 = unused, defaults to 333µs)
-    unsigned int targetProfileLimitTime = 200; // 0=SelfProfile, >0=TargetProfile(limit cycle time µs)
+    unsigned int targetProfileLimitTime = 0;   // 0=SelfProfile (stable), >0=TargetProfile(limit cycle time µs)
     unsigned int dacStabilizationMs = DirettaBuffer::DAC_STABILIZATION_MS;
     unsigned int onlineWaitMs = DirettaBuffer::ONLINE_WAIT_MS;
     unsigned int formatSwitchDelayMs = DirettaBuffer::FORMAT_SWITCH_DELAY_MS;

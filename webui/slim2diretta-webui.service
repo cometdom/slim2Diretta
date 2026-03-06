@@ -1,0 +1,18 @@
+[Unit]
+Description=slim2diretta Web Configuration Interface
+After=network.target
+Documentation=https://github.com/cometdom/slim2diretta
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/slim2diretta/webui/diretta_webui.py \
+    --profile /opt/slim2diretta/webui/profiles/slim2diretta.json \
+    --port 8081
+Restart=on-failure
+RestartSec=5
+
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

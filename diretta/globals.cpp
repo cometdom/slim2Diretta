@@ -12,6 +12,9 @@ LogLevel g_logLevel = LogLevel::INFO;
 // Global verbose flag - kept for DirettaSync compatibility
 bool g_verbose = false;
 
+// Global SCHED_FIFO real-time priority for worker threads
+int g_rtPriority = 50;
+
 // Global log ring for async logging in hot paths
 // Allocated in main() if verbose mode is enabled
 LogRing* g_logRing = nullptr;

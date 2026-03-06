@@ -1,11 +1,11 @@
 [Unit]
-Description=slim2diretta - LMS player with Diretta output (target %i)
+Description=slim2diretta - LMS player with Diretta output
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/slim2diretta --target %i $SLIM2DIRETTA_OPTS
+ExecStart=/usr/local/bin/start-slim2diretta.sh
 EnvironmentFile=-/etc/default/slim2diretta
 
 # Needs root for RT threads and raw network access

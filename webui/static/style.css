@@ -1,0 +1,207 @@
+/* Diretta Web UI — Minimal Configuration Interface */
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #f5f5f5;
+    color: #333;
+    line-height: 1.5;
+    padding: 1rem;
+}
+
+.container {
+    max-width: 620px;
+    margin: 0 auto;
+}
+
+header {
+    text-align: center;
+    padding: 1.5rem 0 1rem;
+}
+
+header h1 {
+    font-size: 1.4rem;
+    font-weight: 600;
+    color: #222;
+}
+
+header .subtitle {
+    font-size: 0.85rem;
+    color: #888;
+    margin-top: 0.2rem;
+}
+
+/* Flash messages */
+.flash {
+    padding: 0.75rem 1rem;
+    border-radius: 6px;
+    margin-bottom: 1rem;
+    font-size: 0.9rem;
+}
+
+.flash.success {
+    background: #e8f5e9;
+    color: #2e7d32;
+    border: 1px solid #c8e6c9;
+}
+
+.flash.error {
+    background: #ffebee;
+    color: #c62828;
+    border: 1px solid #ffcdd2;
+}
+
+/* Setting groups */
+.group {
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    margin-bottom: 1rem;
+    overflow: hidden;
+}
+
+.group-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.75rem 1rem;
+    background: #fafafa;
+    border-bottom: 1px solid #eee;
+    cursor: pointer;
+    user-select: none;
+}
+
+.group-header h2 {
+    font-size: 1rem;
+    font-weight: 600;
+    color: #444;
+}
+
+.group-header .toggle {
+    font-size: 0.8rem;
+    color: #999;
+    transition: transform 0.2s;
+}
+
+.group-header .toggle.open {
+    transform: rotate(90deg);
+}
+
+.group-body {
+    padding: 0.5rem 1rem 1rem;
+}
+
+.group-body.collapsed {
+    display: none;
+}
+
+/* Individual settings */
+.setting {
+    padding: 0.75rem 0;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.setting:last-child {
+    border-bottom: none;
+}
+
+.setting label {
+    display: block;
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: #333;
+    margin-bottom: 0.25rem;
+}
+
+.setting .description {
+    font-size: 0.78rem;
+    color: #888;
+    margin-bottom: 0.4rem;
+}
+
+.setting input[type="text"],
+.setting input[type="number"],
+.setting select {
+    width: 100%;
+    padding: 0.5rem 0.6rem;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    font-size: 0.9rem;
+    background: #fff;
+    color: #333;
+}
+
+.setting input:focus,
+.setting select:focus {
+    outline: none;
+    border-color: #4a90d9;
+    box-shadow: 0 0 0 2px rgba(74, 144, 217, 0.15);
+}
+
+.setting input::placeholder {
+    color: #bbb;
+}
+
+/* Buttons */
+.actions {
+    display: flex;
+    gap: 0.75rem;
+    margin-top: 1.5rem;
+}
+
+.btn {
+    flex: 1;
+    padding: 0.7rem 1rem;
+    border: none;
+    border-radius: 6px;
+    font-size: 0.95rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.btn-primary {
+    background: #4a90d9;
+    color: #fff;
+}
+
+.btn-primary:hover {
+    background: #3a7bc8;
+}
+
+.btn-secondary {
+    background: #e0e0e0;
+    color: #555;
+}
+
+.btn-secondary:hover {
+    background: #d0d0d0;
+}
+
+/* Footer */
+footer {
+    text-align: center;
+    padding: 1.5rem 0;
+    font-size: 0.78rem;
+    color: #aaa;
+}
+
+/* Responsive */
+@media (max-width: 480px) {
+    body {
+        padding: 0.5rem;
+    }
+
+    header h1 {
+        font-size: 1.2rem;
+    }
+
+    .actions {
+        flex-direction: column;
+    }
+}

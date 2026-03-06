@@ -13,9 +13,9 @@ set -e  # Exit on error
 # =============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VERSION="1.0.0"
+APP_VERSION="1.1.0"
 INSTALL_BIN="/usr/local/bin"
-SERVICE_FILE="/etc/systemd/system/slim2diretta@.service"
+SERVICE_FILE="/etc/systemd/system/slim2diretta.service"
 CONFIG_FILE="/etc/default/slim2diretta"
 
 # Auto-detect latest Diretta SDK version
@@ -391,13 +391,16 @@ setup_systemd_service() {
         return 0
     fi
 
-    print_info "1. Installing binary..."
+    print_info "1. Installing binary and startup script..."
     sudo cp "$BINARY_PATH" "$INSTALL_BIN/slim2diretta"
     sudo chmod +x "$INSTALL_BIN/slim2diretta"
+    sudo cp "$SCRIPT_DIR/start-slim2diretta.sh" "$INSTALL_BIN/start-slim2diretta.sh"
+    sudo chmod +x "$INSTALL_BIN/start-slim2diretta.sh"
     print_success "Binary installed: $INSTALL_BIN/slim2diretta"
+    print_success "Startup script installed: $INSTALL_BIN/start-slim2diretta.sh"
 
     print_info "2. Installing systemd service..."
-    sudo cp "$SCRIPT_DIR/slim2diretta@.service" "$SERVICE_FILE"
+    sudo cp "$SCRIPT_DIR/slim2diretta.service" "$SERVICE_FILE"
     print_success "Service file installed: $SERVICE_FILE"
 
     print_info "3. Installing configuration file..."
@@ -438,20 +441,20 @@ setup_systemd_service() {
     read -p "Enter Diretta target number to enable (e.g., 1) or press Enter to skip: " TARGET_NUM
 
     if [ -n "$TARGET_NUM" ]; then
-        print_info "5. Enabling service for target $TARGET_NUM..."
-        sudo systemctl enable "slim2diretta@${TARGET_NUM}.service"
-        print_success "Service slim2diretta@${TARGET_NUM} enabled (starts on boot)"
+        # Set TARGET in config file
+        if [ -f "$CONFIG_FILE" ]; then
+            sudo sed -i "s/^TARGET=.*/TARGET=${TARGET_NUM}/" "$CONFIG_FILE"
+        fi
+        sudo systemctl enable slim2diretta.service
+        print_success "Service slim2diretta enabled with target $TARGET_NUM (starts on boot)"
     fi
+    SVC_NAME="slim2diretta"
 
     echo ""
     print_success "Systemd Service Installation Complete!"
     echo ""
     echo "  Binary:        $INSTALL_BIN/slim2diretta"
-    echo "  Service file:  $SERVICE_FILE"
     echo "  Configuration: $CONFIG_FILE"
-    echo ""
-    echo "  The service uses a template: slim2diretta@<target>"
-    echo "  The target number is passed as --target <N>"
     echo ""
     echo "  Next steps:"
     echo "    1. Edit configuration (optional):"
@@ -460,13 +463,13 @@ setup_systemd_service() {
     echo "       - Set player name, verbose mode, etc."
     echo ""
     echo "    2. Start the service:"
-    echo "       sudo systemctl start slim2diretta@${TARGET_NUM:-1}"
+    echo "       sudo systemctl start $SVC_NAME"
     echo ""
     echo "    3. Check status:"
-    echo "       sudo systemctl status slim2diretta@${TARGET_NUM:-1}"
+    echo "       sudo systemctl status $SVC_NAME"
     echo ""
     echo "    4. View logs:"
-    echo "       sudo journalctl -u slim2diretta@${TARGET_NUM:-1} -f"
+    echo "       sudo journalctl -u $SVC_NAME -f"
     echo ""
 
     # Offer to edit configuration
@@ -479,6 +482,9 @@ setup_systemd_service() {
             print_warning "No editor found. Edit manually: sudo nano $CONFIG_FILE"
         fi
     fi
+
+    # Offer web UI installation
+    setup_webui
 }
 
 # =============================================================================
@@ -500,9 +506,8 @@ update_binary() {
         return 1
     fi
 
-    # Stop running instances
-    local running_instances=$(systemctl list-units --type=service --state=running \
-        'slim2diretta@*' 2>/dev/null | grep slim2diretta | awk '{print $1}')
+    # Stop running service
+    local running_instances=$(systemctl is-active slim2diretta.service 2>/dev/null && echo "slim2diretta.service" || true)
 
     if [ -n "$running_instances" ]; then
         print_info "Stopping running instances..."
@@ -512,9 +517,16 @@ update_binary() {
         done
     fi
 
-    # Copy new binary
+    # Copy new binary and startup script
     sudo cp "$BINARY_PATH" "$INSTALL_BIN/slim2diretta"
     sudo chmod +x "$INSTALL_BIN/slim2diretta"
+    sudo cp "$SCRIPT_DIR/start-slim2diretta.sh" "$INSTALL_BIN/start-slim2diretta.sh"
+    sudo chmod +x "$INSTALL_BIN/start-slim2diretta.sh"
+    # Update service file
+    if [ -f "$SERVICE_FILE" ]; then
+        sudo cp "$SCRIPT_DIR/slim2diretta.service" "$SERVICE_FILE"
+        sudo systemctl daemon-reload
+    fi
     print_success "Binary updated: $INSTALL_BIN/slim2diretta"
 
     # Restart stopped instances
@@ -527,6 +539,88 @@ update_binary() {
     fi
 
     print_success "Update complete!"
+}
+
+# =============================================================================
+# WEB CONFIGURATION UI
+# =============================================================================
+
+setup_webui() {
+    local INSTALL_DIR="/opt/slim2diretta"
+    local WEBUI_DIR="$INSTALL_DIR/webui"
+    local WEBUI_SERVICE_FILE="/etc/systemd/system/slim2diretta-webui.service"
+    local WEBUI_SRC="$SCRIPT_DIR/webui"
+
+    if [ ! -d "$WEBUI_SRC" ]; then
+        print_info "Web UI source not found, skipping"
+        return 0
+    fi
+
+    echo ""
+    if ! confirm "Install web configuration UI (accessible on port 8081)?"; then
+        print_info "Skipping web UI installation"
+        return 0
+    fi
+
+    # Check Python 3
+    if ! command -v python3 &>/dev/null; then
+        print_error "Python 3 is required for the web UI"
+        print_info "Install with: sudo dnf install python3  (or sudo apt install python3)"
+        return 1
+    fi
+
+    print_info "Installing web UI..."
+
+    sudo mkdir -p "$WEBUI_DIR"
+    sudo cp -r "$WEBUI_SRC/diretta_webui.py" "$WEBUI_DIR/"
+    sudo cp -r "$WEBUI_SRC/config_parser.py" "$WEBUI_DIR/"
+    sudo cp -r "$WEBUI_SRC/profiles" "$WEBUI_DIR/"
+    sudo cp -r "$WEBUI_SRC/templates" "$WEBUI_DIR/"
+    sudo cp -r "$WEBUI_SRC/static" "$WEBUI_DIR/"
+    print_success "Web UI files copied to $WEBUI_DIR"
+
+    # Install systemd service
+    if [ -f "$WEBUI_SRC/slim2diretta-webui.service" ]; then
+        sudo cp "$WEBUI_SRC/slim2diretta-webui.service" "$WEBUI_SERVICE_FILE"
+    else
+        sudo tee "$WEBUI_SERVICE_FILE" > /dev/null <<'WEBUI_SERVICE_EOF'
+[Unit]
+Description=slim2diretta Web Configuration Interface
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/slim2diretta/webui/diretta_webui.py \
+    --profile /opt/slim2diretta/webui/profiles/slim2diretta.json \
+    --port 8081
+Restart=on-failure
+RestartSec=5
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+WEBUI_SERVICE_EOF
+    fi
+
+    sudo systemctl daemon-reload
+    sudo systemctl enable slim2diretta-webui.service
+    sudo systemctl restart slim2diretta-webui.service
+
+    # Get IP for display
+    local IP_ADDR=$(hostname -I 2>/dev/null | awk '{print $1}')
+    [ -z "$IP_ADDR" ] && IP_ADDR="<your-ip>"
+
+    echo ""
+    print_success "Web UI installed and running!"
+    echo ""
+    echo "  Access the configuration interface at:"
+    echo "    http://${IP_ADDR}:8081"
+    echo ""
+    echo "  Manage the web UI service:"
+    echo "    sudo systemctl status slim2diretta-webui"
+    echo "    sudo systemctl stop slim2diretta-webui"
+    echo ""
 }
 
 # =============================================================================
@@ -684,15 +778,12 @@ test_installation() {
         fi
     }
 
-    # Check running instances
+    # Check running service
     echo ""
-    local running=$(systemctl list-units --type=service --state=running \
-        'slim2diretta@*' 2>/dev/null | grep slim2diretta || true)
-    if [ -n "$running" ]; then
-        print_success "Running instances:"
-        echo "$running" | awk '{print "  " $1 " - " $3}'
+    if systemctl is-active slim2diretta.service &>/dev/null; then
+        print_success "Service slim2diretta is running"
     else
-        print_info "No running instances"
+        print_info "Service slim2diretta is not running"
     fi
 
     echo ""
@@ -717,19 +808,16 @@ uninstall() {
         return 0
     fi
 
-    # Stop and disable all instances
-    local instances=$(systemctl list-units --type=service --all \
-        'slim2diretta@*' 2>/dev/null | grep slim2diretta | awk '{print $1}')
-    for svc in $instances; do
-        sudo systemctl stop "$svc" 2>/dev/null || true
-        sudo systemctl disable "$svc" 2>/dev/null || true
-        print_info "Stopped and disabled $svc"
-    done
+    # Stop and disable service
+    sudo systemctl stop slim2diretta.service 2>/dev/null || true
+    sudo systemctl disable slim2diretta.service 2>/dev/null || true
+    print_info "Stopped and disabled slim2diretta"
 
-    # Remove binary
+    # Remove binary and startup script
     if [ -f "$INSTALL_BIN/slim2diretta" ]; then
         sudo rm "$INSTALL_BIN/slim2diretta"
-        print_success "Binary removed"
+        sudo rm -f "$INSTALL_BIN/start-slim2diretta.sh"
+        print_success "Binary and startup script removed"
     fi
 
     # Remove service file
@@ -768,7 +856,7 @@ uninstall() {
 show_main_menu() {
     echo ""
     echo "============================================"
-    echo " slim2diretta v$VERSION - Installation"
+    echo " slim2diretta - Installation"
     echo "============================================"
     echo ""
     echo "Installation options:"
@@ -791,8 +879,11 @@ show_main_menu() {
     echo "  6) Test installation"
     echo "     - Verify binaries and list Diretta targets"
     echo ""
+    echo "  7) Install web configuration UI"
+    echo "     - Browser-based settings (port 8081)"
+    echo ""
     if [ "$OS" = "fedora" ]; then
-    echo "  7) Aggressive Fedora optimization"
+    echo "  8) Aggressive Fedora optimization"
     echo "     - For dedicated audio servers only"
     echo ""
     fi
@@ -818,14 +909,14 @@ run_full_installation() {
     echo "  1. Edit configuration (optional, for LMS IP / player name):"
     echo "     sudo nano $CONFIG_FILE"
     echo ""
-    echo "  2. Start the service (replace 1 with your target number):"
-    echo "     sudo systemctl start slim2diretta@1"
+    echo "  2. Start the service:"
+    echo "     sudo systemctl start ${SVC_NAME:-slim2diretta}"
     echo ""
     echo "  3. Check status:"
-    echo "     sudo systemctl status slim2diretta@1"
+    echo "     sudo systemctl status ${SVC_NAME:-slim2diretta}"
     echo ""
     echo "  4. View logs:"
-    echo "     sudo journalctl -u slim2diretta@1 -f"
+    echo "     sudo journalctl -u ${SVC_NAME:-slim2diretta} -f"
     echo ""
     echo "  5. Open LMS web interface and select 'slim2diretta' as player"
     echo ""
@@ -868,6 +959,10 @@ main() {
             test_installation
             exit 0
             ;;
+        --webui|-w)
+            setup_webui
+            exit 0
+            ;;
         --optimize|-o)
             optimize_fedora_aggressive
             exit 0
@@ -886,6 +981,7 @@ main() {
             echo "  --update, -u        Rebuild and update installed binary"
             echo "  --network, -n       Configure network only"
             echo "  --test, -t          Test installation"
+            echo "  --webui, -w         Install web configuration UI"
             echo "  --optimize, -o      Aggressive Fedora optimization"
             echo "  --uninstall         Remove slim2diretta"
             echo "  --help, -h          Show this help"
@@ -899,8 +995,8 @@ main() {
     while true; do
         show_main_menu
 
-        local max_option=6
-        [ "$OS" = "fedora" ] && max_option=7
+        local max_option=7
+        [ "$OS" = "fedora" ] && max_option=8
 
         read -p "Choose option [1-$max_option/u/q]: " choice
 
@@ -928,6 +1024,9 @@ main() {
                 test_installation
                 ;;
             7)
+                setup_webui
+                ;;
+            8)
                 if [ "$OS" = "fedora" ]; then
                     optimize_fedora_aggressive
                 else

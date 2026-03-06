@@ -25,7 +25,7 @@ struct Config {
     std::string transferMode;           // "auto","varmax","varauto","fixauto","random" (empty=auto)
     unsigned int infoCycle = 100000;    // Info packet cycle µs (default 100ms)
     unsigned int cycleMinTime = 0;      // Min cycle for RANDOM mode (0 = unused)
-    unsigned int targetProfileLimitTime = 200; // 0=SelfProfile, >0=TargetProfile(µs)
+    unsigned int targetProfileLimitTime = 0;   // 0=SelfProfile (stable), >0=TargetProfile(µs)
 
     // Audio
     int maxSampleRate = 1536000;

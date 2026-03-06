@@ -111,6 +111,8 @@ private:
 
     uint64_t m_dataRemaining = 0;     // DSD data bytes remaining in container
     uint64_t m_totalBytesOutput = 0;
+    uint64_t m_audioBytesPerChannel = 0;  // Actual audio bytes per channel (no DSF padding)
+    uint64_t m_outputBytesPerChannel = 0; // Bytes output per channel so far
 
     bool m_eof = false;
     bool m_error = false;

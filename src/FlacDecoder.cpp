@@ -316,6 +316,21 @@ FLAC__StreamDecoderWriteStatus FlacDecoder::writeCallback(
 
     uint32_t channels = frame->header.channels;
     uint32_t blocksize = frame->header.blocksize;
+
+    // Fallback format detection from frame header (seek streams without STREAMINFO)
+    if (!self->m_formatReady && channels > 0) {
+        self->m_format.sampleRate = frame->header.sample_rate;
+        self->m_format.bitDepth = frame->header.bits_per_sample;
+        self->m_format.channels = channels;
+        self->m_format.totalSamples = 0;  // Unknown after seek
+        self->m_shift = 32 - static_cast<int>(frame->header.bits_per_sample);
+        self->m_formatReady = true;
+
+        LOG_INFO("[FLAC] Format (from frame): " << frame->header.sample_rate << " Hz, "
+                 << frame->header.bits_per_sample << "-bit, "
+                 << channels << " ch");
+    }
+
     int shift = self->m_shift;
 
     // Reserve space for interleaved output

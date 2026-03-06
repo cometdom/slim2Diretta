@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>${product_name} - Configuration</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>${product_name}</h1>
+            <div class="subtitle">Configuration</div>
+        </header>
+
+        ${flash_html}
+
+        <form method="POST" action="/save">
+            ${groups_html}
+
+            <div class="actions">
+                <button type="submit" class="btn btn-primary">Save &amp; Restart</button>
+                <button type="submit" class="btn btn-secondary" formaction="/restart">Restart Only</button>
+            </div>
+        </form>
+
+        <footer>
+            diretta-webui &middot; ${product_name}
+        </footer>
+    </div>
+
+    <script>
+        // Toggle collapsible groups
+        document.querySelectorAll('.group-header').forEach(function(header) {
+            header.addEventListener('click', function() {
+                var body = this.nextElementSibling;
+                var toggle = this.querySelector('.toggle');
+                body.classList.toggle('collapsed');
+                toggle.classList.toggle('open');
+            });
+        });
+    </script>
+</body>
+</html>

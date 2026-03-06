@@ -63,6 +63,8 @@ void DsdStreamReader::flush() {
     m_rawDsdConfigured = false;
     m_dataRemaining = 0;
     m_totalBytesOutput = 0;
+    m_audioBytesPerChannel = 0;
+    m_outputBytesPerChannel = 0;
     m_eof = false;
     m_error = false;
     m_finished = false;
@@ -253,6 +255,8 @@ bool DsdStreamReader::parseDsfHeader() {
     m_format.isLSBFirst = true;
 
     m_dataRemaining = dataBytes;
+    m_audioBytesPerChannel = sampleCount / 8;  // Actual audio (no block padding)
+    m_outputBytesPerChannel = 0;
     m_formatReady = true;
 
     LOG_INFO("[DSD] DSF: " << DsdProcessor::rateName(sampleRate) << " ("
@@ -489,6 +493,26 @@ size_t DsdStreamReader::processDsfBlocks(uint8_t* out, size_t maxBytes) {
             std::memcpy(out + c * bytesPerCh + g * bs,
                         src + g * blockGroup + c * bs,
                         bs);
+        }
+    }
+
+    // Replace DSF block padding with DSD silence (0x69).
+    // DSF pads the last block of each channel with zeros, but in DSD
+    // zeros are NOT silence — they produce an audible click.
+    // The idle DSD pattern 0x69 (01101001, LSB-first) is near-silent.
+    if (m_audioBytesPerChannel > 0) {
+        uint64_t prevOutput = m_outputBytesPerChannel;
+        m_outputBytesPerChannel += bytesPerCh;
+        if (m_outputBytesPerChannel > m_audioBytesPerChannel) {
+            // Calculate where real audio ends within this output
+            size_t audioInThis = (m_audioBytesPerChannel > prevOutput)
+                ? static_cast<size_t>(m_audioBytesPerChannel - prevOutput) : 0;
+            // For each channel section, fill padding with DSD silence
+            for (uint32_t c = 0; c < ch; c++) {
+                size_t padOffset = c * bytesPerCh + audioInThis;
+                size_t padLen = bytesPerCh - audioInThis;
+                std::memset(out + padOffset, 0x69, padLen);
+            }
         }
     }
 
