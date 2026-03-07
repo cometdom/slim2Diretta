@@ -352,6 +352,34 @@ int main(int argc, char* argv[]) {
               << "═══════════════════════════════════════════════════════\n"
               << std::endl;
 
+    // Log build capabilities for diagnostics
+    {
+        const char* arch =
+#if defined(__aarch64__)
+            "aarch64"
+#elif defined(__x86_64__) || defined(_M_X64)
+            "x86_64"
+#elif defined(__i386__) || defined(_M_IX86)
+            "x86"
+#elif defined(__arm__)
+            "arm"
+#else
+            "unknown"
+#endif
+        ;
+        const char* simd =
+#if DIRETTA_HAS_AVX2
+            "AVX2"
+#elif DIRETTA_HAS_NEON
+            "NEON"
+#else
+            "scalar"
+#endif
+        ;
+        std::cout << "Build: " << arch << " " << simd
+                  << " (" << __DATE__ << ")" << std::endl;
+    }
+
     Config config = parseArguments(argc, argv);
 
     // Apply log level
@@ -902,12 +930,16 @@ int main(int argc, char* argv[]) {
                     // When DirettaSync buffer is full (flow control), we still read
                     // HTTP and decode into this cache. This prevents TCP starvation
                     // that caused underruns with bursty Qobuz streams.
-                    // Max ~1s at 1536kHz stereo = 3072K samples
-                    constexpr size_t DECODE_CACHE_MAX_SAMPLES = 3072000;
+                    // Max ~3s at 1536kHz stereo = 9216K samples
+                    constexpr size_t DECODE_CACHE_MAX_SAMPLES = 9216000;
                     std::vector<int32_t> decodeCache;
                     size_t decodeCachePos = 0;  // Read position (samples consumed)
 
-                    constexpr unsigned int PREBUFFER_MS = 500;
+                    // Adaptive prebuffer: high sample rates (>192kHz) need more margin
+                    // because LMS streams at ~1x real-time at these rates
+                    constexpr unsigned int PREBUFFER_MS_NORMAL = 500;
+                    constexpr unsigned int PREBUFFER_MS_HIGHRATE = 1500;
+                    unsigned int prebufferMs = PREBUFFER_MS_NORMAL;
                     uint64_t pushedFrames = 0;  // Frames actually sent to DirettaSync
                     bool direttaOpened = false;
                     AudioFormat audioFmt{};
@@ -998,6 +1030,10 @@ int main(int argc, char* argv[]) {
                                                      curFormatCode == FORMAT_MP3 ||
                                                      curFormatCode == FORMAT_OGG ||
                                                      curFormatCode == FORMAT_AAC);
+                            // Adapt prebuffer for high sample rates
+                            if (fmt.sampleRate > DirettaBuffer::HIGHRATE_THRESHOLD) {
+                                prebufferMs = PREBUFFER_MS_HIGHRATE;
+                            }
                         }
 
                         // ========== PHASE 3: Prebuffer phase ==========
@@ -1020,7 +1056,7 @@ int main(int argc, char* argv[]) {
 
                             auto fmt = decoder->getFormat();
                             size_t targetFrames = static_cast<size_t>(
-                                fmt.sampleRate) * PREBUFFER_MS / 1000;
+                                fmt.sampleRate) * prebufferMs / 1000;
                             if (cacheFrames() >= targetFrames || httpEof) {
                                 size_t prebufFrames = cacheFrames();
                                 if (prebufFrames == 0) continue;

@@ -189,6 +189,8 @@ namespace DirettaRetry {
 namespace DirettaBuffer {
     constexpr float DSD_BUFFER_SECONDS = 0.8f;
     constexpr float PCM_BUFFER_SECONDS = 0.5f;  // Balance: low latency + resilience
+    constexpr float PCM_HIGHRATE_BUFFER_SECONDS = 2.0f;  // >192kHz: LMS streams at ~1x real-time
+    constexpr uint32_t HIGHRATE_THRESHOLD = 192000;       // Sample rate above which we use larger buffers
 
     constexpr size_t DSD_PREFILL_MS = 200;
     constexpr size_t PCM_PREFILL_MS = 50;       // Restored from 30 for stability
@@ -200,6 +202,9 @@ namespace DirettaBuffer {
     constexpr size_t PREFILL_MS_COMPRESSED = 200;    // FLAC, ALAC
     constexpr size_t PREFILL_MS_UNCOMPRESSED = 100;  // WAV, AIFF
     constexpr size_t PREFILL_MS_DSD = 150;           // DSD (fixed)
+    // High sample rates (>192kHz): LMS delivers at ~1x real-time, need more margin
+    constexpr size_t PREFILL_MS_HIGHRATE_COMPRESSED = 1500;
+    constexpr size_t PREFILL_MS_HIGHRATE_UNCOMPRESSED = 1000;
 
     constexpr float REBUFFER_THRESHOLD_PCT = 0.20f;      // Resume playback after 20% buffer refill
 
@@ -211,7 +216,7 @@ namespace DirettaBuffer {
     // UPnP push model needs larger buffers than MPD's pull model
     // 64KB = ~370ms floor at 44.1kHz/16-bit, negligible at higher rates
     constexpr size_t MIN_BUFFER_BYTES = 65536;  // Was 3072000
-    constexpr size_t MAX_BUFFER_BYTES = 16777216;
+    constexpr size_t MAX_BUFFER_BYTES = 33554432;  // 32MB: accommodates 1536kHz/32bit/2ch @ 2s
     constexpr size_t MIN_PREFILL_BYTES = 1024;
 
     inline size_t calculateBufferSize(size_t bytesPerSecond, float seconds) {
@@ -219,6 +224,10 @@ namespace DirettaBuffer {
         size = std::max(size, MIN_BUFFER_BYTES);
         size = std::min(size, MAX_BUFFER_BYTES);
         return size;
+    }
+
+    inline float pcmBufferSeconds(uint32_t sampleRate) {
+        return (sampleRate > HIGHRATE_THRESHOLD) ? PCM_HIGHRATE_BUFFER_SECONDS : PCM_BUFFER_SECONDS;
     }
 
     inline size_t calculatePrefill(size_t bytesPerSecond, bool isDsd, bool isLowBitrate) {

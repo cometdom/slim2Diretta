@@ -1180,9 +1180,17 @@ void DirettaSync::configureSinkDSD(uint32_t dsdBitRate, int channels, const Audi
 size_t DirettaSync::calculateAlignedPrefill(size_t bytesPerSecond, size_t bytesPerBuffer,
                                             bool isDSD, bool isCompressed) {
     // Determine target fill time based on format
+    // High sample rates (>192kHz): LMS streams at ~1x real-time, need larger prefill
+    uint32_t rate = m_sampleRate.load(std::memory_order_relaxed);
+    bool highRate = !isDSD && (rate > DirettaBuffer::HIGHRATE_THRESHOLD);
+
     size_t targetMs;
     if (isDSD) {
         targetMs = DirettaBuffer::PREFILL_MS_DSD;
+    } else if (highRate && isCompressed) {
+        targetMs = DirettaBuffer::PREFILL_MS_HIGHRATE_COMPRESSED;
+    } else if (highRate) {
+        targetMs = DirettaBuffer::PREFILL_MS_HIGHRATE_UNCOMPRESSED;
     } else if (isCompressed) {
         targetMs = DirettaBuffer::PREFILL_MS_COMPRESSED;
     } else {
@@ -1197,9 +1205,10 @@ size_t DirettaSync::calculateAlignedPrefill(size_t bytesPerSecond, size_t bytesP
 
     // Clamp to reasonable bounds
     // Min: 8 buffers (ensures stability)
-    // Max: 1/4 of ring buffer capacity (leaves room for decode variance)
+    // Max: 1/2 of ring buffer capacity for high rates, 1/4 for normal rates
     size_t ringSize = m_ringBuffer.size();
-    size_t maxBuffers = (ringSize > 0 && bytesPerBuffer > 0) ? ringSize / (4 * bytesPerBuffer) : 100;
+    size_t divisor = highRate ? 2 : 4;
+    size_t maxBuffers = (ringSize > 0 && bytesPerBuffer > 0) ? ringSize / (divisor * bytesPerBuffer) : 100;
 
     targetBuffers = std::max(targetBuffers, size_t{8});
     targetBuffers = std::min(targetBuffers, maxBuffers);
@@ -1230,7 +1239,8 @@ void DirettaSync::configureRingPCM(int rate, int channels, int direttaBps, int i
     m_consumerStateGen.fetch_add(1, std::memory_order_release);
 
     size_t bytesPerSecond = static_cast<size_t>(rate) * channels * direttaBps;
-    size_t ringSize = DirettaBuffer::calculateBufferSize(bytesPerSecond, DirettaBuffer::PCM_BUFFER_SECONDS);
+    float bufferSec = DirettaBuffer::pcmBufferSeconds(static_cast<uint32_t>(rate));
+    size_t ringSize = DirettaBuffer::calculateBufferSize(bytesPerSecond, bufferSec);
 
     m_ringBuffer.resize(ringSize, 0x00);
     ringSize = m_ringBuffer.size();
