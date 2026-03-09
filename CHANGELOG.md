@@ -6,6 +6,8 @@ All notable changes to slim2diretta are documented in this file.
 
 ### Fixed
 
+- **Seek causes track skip with Roon**: When seeking within a track, Roon (Squeezebox mode) would skip to the next track instead of seeking. The audio thread was sending STMu (track ended) on forced stop (`strm-q`), which Roon interpreted as the new stream ending. Now STMu is only sent on natural end-of-track (HTTP EOF). LMS tolerated the spurious STMu; Roon's stricter state machine did not.
+
 - **High sample rate buffer underruns (>192kHz)**: Adaptive buffer sizing for sample rates above 192kHz (352.8kHz, 384kHz, 768kHz, 1536kHz). LMS streams at ~1x real-time at these rates, leaving no margin with the previous 0.5s ring buffer. New behavior:
   - Ring buffer: 0.5s → 2.0s for rates >192kHz
   - Prebuffer: 500ms → 1500ms for rates >192kHz

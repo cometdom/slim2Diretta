@@ -869,7 +869,12 @@ int main(int argc, char* argv[]) {
                         break;  // Exit DSD chaining loop
                       }  // end DSD chaining loop
 
-                      slimproto->sendStat(StatEvent::STMu);
+                      // Only send STMu (track ended) on natural end, not on forced stop
+                      // Sending STMu after strm-q confuses Roon into thinking the
+                      // new seek stream has ended, causing it to skip to the next track
+                      if (audioTestRunning.load(std::memory_order_acquire)) {
+                          slimproto->sendStat(StatEvent::STMu);
+                      }
                       audioThreadDone.store(true, std::memory_order_release);
                       return;
                     }
@@ -1357,7 +1362,12 @@ int main(int argc, char* argv[]) {
                     }  // end PCM/FLAC chaining loop
                     }  // end PCM/FLAC scope
 
-                    slimproto->sendStat(StatEvent::STMu);  // Underrun (natural end)
+                    // Only send STMu (track ended) on natural end, not on forced stop
+                    // Sending STMu after strm-q confuses Roon into thinking the
+                    // new seek stream has ended, causing it to skip to the next track
+                    if (audioTestRunning.load(std::memory_order_acquire)) {
+                        slimproto->sendStat(StatEvent::STMu);
+                    }
                     audioThreadDone.store(true, std::memory_order_release);
                 });
                 break;
