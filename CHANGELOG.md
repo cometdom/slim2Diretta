@@ -2,7 +2,7 @@
 
 All notable changes to slim2diretta are documented in this file.
 
-## v1.1.1 (unreleased)
+## v1.1.1 (2026-03-10)
 
 ### Fixed
 
@@ -15,6 +15,8 @@ All notable changes to slim2diretta are documented in this file.
   - MAX_BUFFER raised to 32MB (accommodates 1536kHz/32bit/2ch @ 2s)
   - Decode cache raised to 9.2M samples (~3s at 1536kHz stereo)
   - No change for rates ≤192kHz (identical behavior to v1.1.0)
+
+- **FLAC metadata log spam**: FLAC format information was logged repeatedly (dozens of times) for tracks with large metadata blocks (album art). The STREAMINFO callback was re-triggered on each metadata retry. Now logged only once per track.
 
 ### Added
 
