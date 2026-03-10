@@ -22,6 +22,8 @@ RT_PRIORITY="${RT_PRIORITY:-50}"
 SLIM2DIRETTA_BIN="/usr/local/bin/slim2diretta"
 
 # Build command with target and user options
+# Note: SLIM2DIRETTA_OPTS may contain quoted values (e.g. --name "My Player"),
+# so we use eval to preserve shell quoting when constructing the command.
 CMD="$SLIM2DIRETTA_BIN --target $TARGET_INDEX $SLIM2DIRETTA_OPTS"
 
 if [ -n "$RT_PRIORITY" ] && [ "$RT_PRIORITY" != "50" ]; then
@@ -74,4 +76,5 @@ echo "════════════════════════�
 echo ""
 
 # Execute with priority settings
-exec $EXEC_PREFIX $CMD
+# Use eval to preserve quoted arguments in SLIM2DIRETTA_OPTS (e.g. --name "My Player")
+eval exec $EXEC_PREFIX $CMD

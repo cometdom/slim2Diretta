@@ -74,6 +74,25 @@ LMS (network)
 | `diretta/LogLevel.h` | Centralized log level system |
 | `diretta/FastMemcpy*.h` | SIMD memory operations |
 
+**Web UI** (`webui/`):
+
+| File | Purpose |
+|------|---------|
+| `webui/diretta_webui.py` | HTTP server (custom BaseHTTPRequestHandler, no framework) |
+| `webui/config_parser.py` | Config parsers: `ShellVarConfig` (KEY=VALUE) and `CliOptsConfig` (CLI args) |
+| `webui/profiles/slim2diretta.json` | Product profile defining settings groups and field types |
+| `webui/templates/index.html` | HTML template with embedded JavaScript |
+| `webui/static/style.css` | Minimal CSS styling |
+| `webui/slim2diretta-webui.service` | Systemd service (port 8081) |
+
+**Startup & Install**:
+
+| File | Purpose |
+|------|---------|
+| `start-slim2diretta.sh` | Startup wrapper: reads `/etc/default/slim2diretta`, applies priority, `eval exec` |
+| `install.sh` | Interactive installer (binary, service, webui) |
+| `slim2diretta.service` | Main systemd service |
+
 ## Code Style
 
 - **C++17** standard
@@ -103,10 +122,23 @@ SDK locations searched (in order):
 3. `./DirettaHostSDK_148` or `./DirettaHostSDK_147`
 4. `/opt/DirettaHostSDK_148` or `/opt/DirettaHostSDK_147`
 
+## Web UI
+
+- Python 3 HTTP server on port 8081 (no external dependencies)
+- Reads/writes `/etc/default/slim2diretta` (EnvironmentFile for systemd)
+- Config format: `SLIM2DIRETTA_OPTS="--server 192.168.1.10 --name \"My Player\" -v"`
+- `config_parser.py` has two parsers:
+  - `ShellVarConfig`: KEY=VALUE lines (shared with DirettaRendererUPnP)
+  - `CliOptsConfig`: single variable with CLI args (slim2diretta)
+- `start-slim2diretta.sh` uses `eval exec` to preserve quoted arguments from SLIM2DIRETTA_OPTS
+- Settings profile in `webui/profiles/slim2diretta.json`
+- Install via `./install.sh --webui` or option 7 in interactive menu
+
 ## Important Notes
 
 - Requires root/sudo for real-time thread priority
 - Linux only
+- Diretta protocol uses IPv6 link-local for target communication
 - Diretta SDK is personal-use only - never commit SDK files
 - Volume forced to 100% for bit-perfect playback
 - The `diretta/` folder is shared code with squeeze2diretta and DirettaRendererUPnP
