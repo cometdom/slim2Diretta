@@ -1,4 +1,4 @@
-# slim2diretta v1.1.0
+# slim2diretta v1.1.1
 
 **Native LMS Player with Diretta Output - Mono-Process Architecture**
 
@@ -8,7 +8,7 @@
 
 ---
 
-![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)
+![Version](https://img.shields.io/badge/version-1.1.1-blue.svg)
 ![DSD](https://img.shields.io/badge/DSD-Native-green.svg)
 ![SDK](https://img.shields.io/badge/SDK-DIRETTA::Sync-orange.svg)
 
@@ -197,6 +197,25 @@ Both tools share the same **DirettaSync v2.0** engine for Diretta output.
 ---
 
 ## Upgrading
+
+### From v1.1.0 to v1.1.1
+
+```bash
+# 1. Stop the service
+sudo systemctl stop slim2diretta@1
+
+# 2. Pull the latest version
+cd ~/slim2diretta
+git pull
+
+# 3. Rebuild and update the binary
+./install.sh --update
+
+# 4. Restart the service
+sudo systemctl start slim2diretta@1
+```
+
+> **What's new in v1.1.1:** Fix for Roon seek causing track skip, adaptive buffer sizing for high sample rates (>192kHz), FLAC metadata log spam fix, and build capabilities logging at startup.
 
 ### From v1.0.0 to v1.1.0
 
@@ -727,4 +746,4 @@ This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) 
 
 **Enjoy native DSD and hi-res PCM streaming from your LMS library!**
 
-*Last updated: 2026-03-06 (v1.1.0)*
+*Last updated: 2026-03-10 (v1.1.1)*
