@@ -1003,22 +1003,15 @@ int main(int argc, char* argv[]) {
 
                                 float bufLevel = direttaPtr->getBufferLevel();
 
-                                // Adaptive throttle (aligned with DirettaRendererUPnP):
-                                // >50%: sleep 10ms then push (smooth, regular pattern)
-                                // 10-50%: push immediately
-                                // <10%: push aggressively (double batch)
-                                // >95%: wait for space (event-based)
+                                // Throttle: only wait when ring buffer is nearly full.
+                                // Push as fast as possible otherwise — VARMax mode
+                                // needs continuous feeding, sleeps cause corruption.
                                 if (bufLevel > 0.95f) {
                                     std::unique_lock<std::mutex> flowLock(
                                         direttaPtr->getFlowMutex());
                                     direttaPtr->waitForSpace(flowLock,
                                         std::chrono::microseconds(500));
                                     continue;
-                                }
-
-                                if (bufLevel > 0.50f) {
-                                    std::this_thread::sleep_for(
-                                        std::chrono::milliseconds(10));
                                 }
 
                                 // Read chunk from cache (under lock)
@@ -1030,8 +1023,6 @@ int main(int argc, char* argv[]) {
                                         // No data — will wait below
                                     } else {
                                         size_t maxPush = PUSH_FRAMES;
-                                        // Double batch when buffer critically low
-                                        if (bufLevel < 0.10f) maxPush *= 2;
                                         push = std::min(avail, maxPush);
                                         if (push * detectedChannels > localBuf.size()) {
                                             localBuf.resize(push * detectedChannels);
