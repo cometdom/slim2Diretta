@@ -1270,42 +1270,12 @@ int main(int argc, char* argv[]) {
                                 LOG_INFO("[Audio] Pre-buffered " << prebufFrames
                                          << " frames (" << prebufMs << "ms)");
 
-                                // Flush prebuffer — stop when ring buffer is full
-                                const int32_t* ptr = decodeCache.data() + decodeCachePos;
-                                size_t remaining = prebufFrames;
-                                size_t actualPushed = 0;
-                                while (remaining > 0 &&
-                                       audioTestRunning.load(std::memory_order_relaxed)) {
-                                    if (direttaPtr->getBufferLevel() > 0.95f) break;
-                                    size_t chunk = std::min(remaining, MAX_DECODE_FRAMES);
-                                    if (dopDetected) {
-                                        // Convert DoP → native DSD planar
-                                        DsdProcessor::convertDopToNative(
-                                            reinterpret_cast<const uint8_t*>(ptr),
-                                            dopBuf.data(), chunk,
-                                            detectedChannels);
-                                        size_t dsdBytes = chunk * 2
-                                                          * detectedChannels;
-                                        size_t numDsdSamples =
-                                            dsdBytes * 8 / detectedChannels;
-                                        direttaPtr->sendAudio(
-                                            dopBuf.data(), numDsdSamples);
-                                    } else {
-                                        direttaPtr->sendAudio(
-                                            reinterpret_cast<const uint8_t*>(ptr),
-                                            chunk);
-                                    }
-                                    ptr += chunk * detectedChannels;
-                                    remaining -= chunk;
-                                    actualPushed += chunk;
-                                }
-                                decodeCachePos += actualPushed * detectedChannels;
-                                pushedFrames.store(actualPushed, std::memory_order_release);
+                                // All sendAudio calls must come from the push thread
+                                // (VARMax mode has thread affinity for audio pushing).
+                                // Prebuffer data stays in cache — push thread will
+                                // consume it immediately on startup.
                                 direttaOpened = true;
                                 slimproto->sendStat(StatEvent::STMl);
-
-                                // Launch push thread — handles Phase 4/5/6
-                                // with adaptive throttle aligned to DirettaRendererUPnP
                                 launchPushThread();
                             }
                             continue;  // Stay in prebuffer mode
