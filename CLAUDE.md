@@ -122,15 +122,29 @@ SDK locations searched (in order):
 3. `./DirettaHostSDK_148` or `./DirettaHostSDK_147`
 4. `/opt/DirettaHostSDK_148` or `/opt/DirettaHostSDK_147`
 
+
+## Audio Push Strategy
+
+The audio thread (in `main.cpp`) handles HTTP reading, decoding, and ring buffer pushing in a single thread. Key constants and patterns:
+
+- **MAX_DECODE_FRAMES = 1024**: Decoder reads (adapts to libFLAC frame sizes)
+- **PUSH_CHUNK_FRAMES = 2048**: Push to DirettaSync (fewer calls, smoother pattern)
+- **Flow control**: Event-based `waitForSpace(500µs)` on condition variable when buffer >95% (not blind sleep)
+- **Adaptive throttle**: 2ms pause after push when buffer >50% (healthy), immediate push when ≤50% (catch-up)
+- **Decode cache**: Up to 9.2M samples with compaction every 500k consumed samples
+- **Prebuffer**: 500ms normal, 1500ms for >192kHz
+
+This pattern was aligned with DirettaRendererUPnP's audio engine for consistent delivery characteristics across both projects.
+
 ## Web UI
 
 - Python 3 HTTP server on port 8081 (no external dependencies)
 - Reads/writes `/etc/default/slim2diretta` (EnvironmentFile for systemd)
 - Config format: `SLIM2DIRETTA_OPTS="--server 192.168.1.10 --name \"My Player\" -v"`
+- **Player names with spaces** must be quoted in SLIM2DIRETTA_OPTS; `start-slim2diretta.sh` uses `eval exec` to preserve quoting
 - `config_parser.py` has two parsers:
   - `ShellVarConfig`: KEY=VALUE lines (shared with DirettaRendererUPnP)
   - `CliOptsConfig`: single variable with CLI args (slim2diretta)
-- `start-slim2diretta.sh` uses `eval exec` to preserve quoted arguments from SLIM2DIRETTA_OPTS
 - Settings profile in `webui/profiles/slim2diretta.json`
 - Install via `./install.sh --webui` or option 7 in interactive menu
 

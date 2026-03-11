@@ -2,7 +2,7 @@
 
 All notable changes to slim2diretta are documented in this file.
 
-## v1.1.1 (2026-03-10)
+## v1.1.1 (2026-03-11)
 
 ### Fixed
 
@@ -19,6 +19,14 @@ All notable changes to slim2diretta are documented in this file.
 - **FLAC metadata log spam**: FLAC format information was logged repeatedly (dozens of times) for tracks with large metadata blocks (album art). The STREAMINFO callback was re-triggered on each metadata retry. Now logged only once per track.
 
 - **Player name with spaces ignored (webui)**: When the player name contained spaces (e.g. "Devialet Target"), the startup script lost the quoting and the second word became an unknown option. Fixed with `eval exec` to preserve quoted arguments from `SLIM2DIRETTA_OPTS`.
+
+### Improved
+
+- **Audio delivery optimization**: Aligned push pattern with DirettaRendererUPnP for smoother data delivery to Diretta target, reducing jitter and improving audio quality:
+  - Push chunk size increased from 1024 to 2048 frames (fewer sendAudio calls, more regular pattern)
+  - Event-based flow control (condition variable) replaces blind 1ms sleep when ring buffer is full (jitter reduced from ±1ms to ±50µs)
+  - Adaptive throttle: 2ms pause when buffer is healthy (>50%), immediate push when buffer is low (≤50%)
+  - Decode cache compaction threshold raised from 100k to 500k samples (fewer memory stalls)
 
 ### Added
 
