@@ -969,21 +969,11 @@ int main(int argc, char* argv[]) {
                                std::max(detectedChannels, 1);
                     };
 
-                    // Push thread: handles ALL DirettaSync interaction (open,
-                    // sendAudio, getBufferLevel) from a single thread. This is
-                    // critical for VARMax mode which has thread affinity.
-                    //
-                    // For initial launch: openNeeded=true, does open() + prebuffer
-                    // For gapless same-format: openNeeded=false, starts pushing immediately
-                    std::atomic<bool> pushOpenNeeded{false};
-                    std::atomic<bool> pushOpenDone{false};
-                    std::atomic<bool> pushOpenFailed{false};
-
-                    auto launchPushThread = [&](bool needOpen) {
+                    // Push thread: reads from decode cache and pushes to DirettaSync.
+                    // Decode thread handles open() + prebuffer flush, push thread
+                    // handles all subsequent sendAudio calls.
+                    auto launchPushThread = [&]() {
                         decodeDone.store(false, std::memory_order_release);
-                        pushOpenNeeded.store(needOpen, std::memory_order_release);
-                        pushOpenDone.store(false, std::memory_order_release);
-                        pushOpenFailed.store(false, std::memory_order_release);
                         if (pushThread.joinable()) pushThread.join();
 
                         pushThread = std::thread([&]() {
@@ -995,61 +985,6 @@ int main(int argc, char* argv[]) {
                             }
                             uint64_t lastLog = 0;
 
-                            // Phase A: Open DirettaSync if needed (first track only)
-                            if (pushOpenNeeded.load(std::memory_order_acquire)) {
-                                if (!direttaPtr->open(audioFmt)) {
-                                    LOG_ERROR("[Audio] Failed to open Diretta output");
-                                    pushOpenFailed.store(true, std::memory_order_release);
-                                    pushOpenDone.store(true, std::memory_order_release);
-                                    return;
-                                }
-                                if (!dopDetected) {
-                                    direttaPtr->setS24PackModeHint(
-                                        DirettaRingBuffer::S24PackMode::MsbAligned);
-                                }
-                                pushOpenDone.store(true, std::memory_order_release);
-
-                                // Phase B: Flush prebuffer — push all cached data
-                                {
-                                    std::lock_guard<std::mutex> lock(cacheMutex);
-                                    size_t prebufFrames = cacheFrames();
-                                    if (prebufFrames > 0) {
-                                        const int32_t* ptr = decodeCache.data() + decodeCachePos;
-                                        size_t remaining = prebufFrames;
-                                        size_t actualPushed = 0;
-                                        while (remaining > 0) {
-                                            if (direttaPtr->getBufferLevel() > 0.95f) break;
-                                            size_t chunk = std::min(remaining, size_t(1024));
-                                            if (dopDetected) {
-                                                DsdProcessor::convertDopToNative(
-                                                    reinterpret_cast<const uint8_t*>(ptr),
-                                                    localDopBuf.data(), chunk,
-                                                    detectedChannels);
-                                                size_t dsdBytes = chunk * 2 * detectedChannels;
-                                                size_t numDsdSamples = dsdBytes * 8 / detectedChannels;
-                                                direttaPtr->sendAudio(localDopBuf.data(), numDsdSamples);
-                                            } else {
-                                                direttaPtr->sendAudio(
-                                                    reinterpret_cast<const uint8_t*>(ptr), chunk);
-                                            }
-                                            ptr += chunk * detectedChannels;
-                                            remaining -= chunk;
-                                            actualPushed += chunk;
-                                        }
-                                        decodeCachePos += actualPushed * detectedChannels;
-                                        pushedFrames.store(actualPushed, std::memory_order_release);
-                                    }
-                                }
-                            } else {
-                                // Gapless same-format: already open, just signal ready
-                                if (!dopDetected) {
-                                    direttaPtr->setS24PackModeHint(
-                                        DirettaRingBuffer::S24PackMode::MsbAligned);
-                                }
-                                pushOpenDone.store(true, std::memory_order_release);
-                            }
-
-                            // Phase C: Regular push loop with adaptive throttle
                             while (audioTestRunning.load(std::memory_order_acquire)) {
                                 {
                                     std::lock_guard<std::mutex> lock(cacheMutex);
@@ -1073,7 +1008,6 @@ int main(int argc, char* argv[]) {
                                     continue;
                                 }
 
-                                // Read chunk from cache (under lock)
                                 size_t push = 0;
                                 {
                                     std::lock_guard<std::mutex> lock(cacheMutex);
@@ -1091,7 +1025,6 @@ int main(int argc, char* argv[]) {
                                             push * detectedChannels * sizeof(int32_t));
                                         decodeCachePos += push * detectedChannels;
 
-                                        // Compact cache periodically
                                         if (decodeCachePos > 500000) {
                                             decodeCache.erase(decodeCache.begin(),
                                                 decodeCache.begin() + decodeCachePos);
@@ -1107,7 +1040,6 @@ int main(int argc, char* argv[]) {
                                     continue;
                                 }
 
-                                // Push to DirettaSync (outside lock)
                                 if (dopDetected) {
                                     if (localDopBuf.size() < push * 2 * detectedChannels) {
                                         localDopBuf.resize(push * 2 * detectedChannels);
@@ -1242,9 +1174,13 @@ int main(int argc, char* argv[]) {
                                 audioFmt.channels == prevAudioFmt.channels &&
                                 audioFmt.isDSD == prevAudioFmt.isDSD) {
                                 LOG_INFO("[Gapless] PCM same format, continuing ring buffer");
+                                if (!dopDetected) {
+                                    direttaPtr->setS24PackModeHint(
+                                        DirettaRingBuffer::S24PackMode::MsbAligned);
+                                }
                                 direttaOpened = true;
                                 pushedFrames.store(0, std::memory_order_release);
-                                launchPushThread(false);
+                                launchPushThread();
                                 slimproto->sendStat(StatEvent::STMl);
                                 continue;
                             }
@@ -1301,33 +1237,59 @@ int main(int argc, char* argv[]) {
                                     }
                                 }
 
-                                uint32_t prebufMs = static_cast<uint32_t>(
-                                    prebufFrames * 1000 / (dopDetected
-                                        ? dopPcmRate : fmt.sampleRate));
-                                LOG_INFO("[Audio] Pre-buffered " << prebufFrames
-                                         << " frames (" << prebufMs << "ms)");
-
-                                // Launch push thread — does open() + prebuffer flush
-                                // + regular push, all from same thread (VARMax needs this)
-                                launchPushThread(true);
-
-                                // Wait for open() to complete in push thread
-                                while (!pushOpenDone.load(std::memory_order_acquire) &&
-                                       audioTestRunning.load(std::memory_order_acquire)) {
-                                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
-                                }
-                                if (pushOpenFailed.load(std::memory_order_acquire)) {
+                                if (!direttaPtr->open(audioFmt)) {
                                     LOG_ERROR("[Audio] Failed to open Diretta output");
                                     slimproto->sendStat(StatEvent::STMn);
-                                    if (pushThread.joinable()) pushThread.join();
                                     if (pcmFirstTrack) {
                                         audioThreadDone.store(true, std::memory_order_release);
                                         return;
                                     }
                                     break;
                                 }
+                                if (!dopDetected) {
+                                    direttaPtr->setS24PackModeHint(
+                                        DirettaRingBuffer::S24PackMode::MsbAligned);
+                                }
+
+                                uint32_t prebufMs = static_cast<uint32_t>(
+                                    prebufFrames * 1000 / (dopDetected
+                                        ? dopPcmRate : fmt.sampleRate));
+                                LOG_INFO("[Audio] Pre-buffered " << prebufFrames
+                                         << " frames (" << prebufMs << "ms)");
+
+                                // Flush prebuffer from decode thread
+                                const int32_t* ptr = decodeCache.data() + decodeCachePos;
+                                size_t remaining = prebufFrames;
+                                size_t actualPushed = 0;
+                                while (remaining > 0 &&
+                                       audioTestRunning.load(std::memory_order_relaxed)) {
+                                    if (direttaPtr->getBufferLevel() > 0.95f) break;
+                                    size_t chunk = std::min(remaining, MAX_DECODE_FRAMES);
+                                    if (dopDetected) {
+                                        DsdProcessor::convertDopToNative(
+                                            reinterpret_cast<const uint8_t*>(ptr),
+                                            dopBuf.data(), chunk,
+                                            detectedChannels);
+                                        size_t dsdBytes = chunk * 2
+                                                          * detectedChannels;
+                                        size_t numDsdSamples =
+                                            dsdBytes * 8 / detectedChannels;
+                                        direttaPtr->sendAudio(
+                                            dopBuf.data(), numDsdSamples);
+                                    } else {
+                                        direttaPtr->sendAudio(
+                                            reinterpret_cast<const uint8_t*>(ptr),
+                                            chunk);
+                                    }
+                                    ptr += chunk * detectedChannels;
+                                    remaining -= chunk;
+                                    actualPushed += chunk;
+                                }
+                                decodeCachePos += actualPushed * detectedChannels;
+                                pushedFrames.store(actualPushed, std::memory_order_release);
                                 direttaOpened = true;
                                 slimproto->sendStat(StatEvent::STMl);
+                                launchPushThread();
                             }
                             continue;  // Stay in prebuffer mode
                         }
