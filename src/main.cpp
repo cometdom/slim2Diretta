@@ -1003,13 +1003,11 @@ int main(int argc, char* argv[]) {
 
                                 float bufLevel = direttaPtr->getBufferLevel();
 
-                                // Throttle: only wait when ring buffer is nearly full.
-                                // Push as fast as possible otherwise — VARMax mode
-                                // needs continuous feeding, sleeps cause corruption.
+                                // Throttle: simple sleep when ring buffer is nearly full.
+                                // Avoid waitForSpace/getFlowMutex — may have thread
+                                // affinity issues in VARMax mode.
                                 if (bufLevel > 0.95f) {
-                                    std::unique_lock<std::mutex> flowLock(
-                                        direttaPtr->getFlowMutex());
-                                    direttaPtr->waitForSpace(flowLock,
+                                    std::this_thread::sleep_for(
                                         std::chrono::microseconds(500));
                                     continue;
                                 }
