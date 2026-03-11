@@ -800,27 +800,17 @@ int main(int argc, char* argv[]) {
 
                             // === PHASE 4: Push DSD — readPlanar directly to sendAudio ===
                             if (direttaOpened && dsdReader->availableBytes() > 0) {
-                                float bufLevel = direttaPtr->getBufferLevel();
                                 if (direttaPtr->isPaused()) {
                                     std::this_thread::sleep_for(std::chrono::milliseconds(100));
-                                } else if (bufLevel <= 0.95f) {
+                                } else if (direttaPtr->getBufferLevel() <= 0.95f) {
                                     size_t bytes = dsdReader->readPlanar(planarBuf, DSD_PLANAR_BUF);
                                     if (bytes > 0) {
                                         size_t numSamples = (bytes * 8) / detectedChannels;
                                         direttaPtr->sendAudio(planarBuf, numSamples);
                                         pushedDsdBytes += bytes;
                                     }
-                                    // Throttle when buffer is healthy
-                                    if (bufLevel > 0.50f) {
-                                        std::this_thread::sleep_for(
-                                            std::chrono::milliseconds(2));
-                                    }
                                 } else {
-                                    // Buffer full — event-based wait
-                                    std::unique_lock<std::mutex> lock(
-                                        direttaPtr->getFlowMutex());
-                                    direttaPtr->waitForSpace(lock,
-                                        std::chrono::microseconds(500));
+                                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
                                 }
                             }
 
@@ -936,7 +926,7 @@ int main(int argc, char* argv[]) {
 
                     uint8_t httpBuf[65536];
                     constexpr size_t MAX_DECODE_FRAMES = 1024;
-                    constexpr size_t PUSH_CHUNK_FRAMES = 2048;  // Larger push chunks = smoother delivery
+
                     int32_t decodeBuf[MAX_DECODE_FRAMES * 2];
                     uint64_t totalBytes = 0;
                     bool formatLogged = false;
@@ -1111,7 +1101,7 @@ int main(int argc, char* argv[]) {
                                         audioFmt.sampleRate = dsdRate;
                                         audioFmt.dsdFormat =
                                             AudioFormat::DSDFormat::DFF;
-                                        dopBuf.resize(PUSH_CHUNK_FRAMES * 2
+                                        dopBuf.resize(MAX_DECODE_FRAMES * 2
                                                       * detectedChannels);
                                         LOG_INFO("[Audio] DoP detected — "
                                             << DsdProcessor::rateName(dsdRate)
@@ -1153,7 +1143,7 @@ int main(int argc, char* argv[]) {
                                 while (remaining > 0 &&
                                        audioTestRunning.load(std::memory_order_relaxed)) {
                                     if (direttaPtr->getBufferLevel() > 0.95f) break;
-                                    size_t chunk = std::min(remaining, PUSH_CHUNK_FRAMES);
+                                    size_t chunk = std::min(remaining, MAX_DECODE_FRAMES);
                                     if (dopDetected) {
                                         // Convert DoP → native DSD planar
                                         DsdProcessor::convertDopToNative(
@@ -1185,40 +1175,12 @@ int main(int argc, char* argv[]) {
 
                         // ========== PHASE 4: Push from cache to DirettaSync ==========
                         if (direttaOpened && cacheFrames() > 0) {
-                            float bufLevel = direttaPtr->getBufferLevel();
                             if (direttaPtr->isPaused()) {
                                 std::this_thread::sleep_for(
                                     std::chrono::milliseconds(100));
-                            } else if (bufLevel > 0.50f && bufLevel <= 0.95f) {
-                                // Buffer healthy — push but throttle to smooth
-                                // delivery pattern (reduces jitter vs tight loop)
-                                size_t push = std::min(cacheFrames(), PUSH_CHUNK_FRAMES);
-                                if (dopDetected) {
-                                    DsdProcessor::convertDopToNative(
-                                        reinterpret_cast<const uint8_t*>(
-                                            decodeCache.data() + decodeCachePos),
-                                        dopBuf.data(), push,
-                                        detectedChannels);
-                                    size_t dsdBytes = push * 2
-                                                      * detectedChannels;
-                                    size_t numDsdSamples =
-                                        dsdBytes * 8 / detectedChannels;
-                                    direttaPtr->sendAudio(
-                                        dopBuf.data(), numDsdSamples);
-                                } else {
-                                    direttaPtr->sendAudio(
-                                        reinterpret_cast<const uint8_t*>(
-                                            decodeCache.data() + decodeCachePos),
-                                        push);
-                                }
-                                decodeCachePos += push * detectedChannels;
-                                pushedFrames += push;
-                                // Throttle: brief pause after push when buffer is healthy
-                                std::this_thread::sleep_for(
-                                    std::chrono::milliseconds(2));
-                            } else if (bufLevel <= 0.50f) {
-                                // Buffer low — push immediately, no throttle
-                                size_t push = std::min(cacheFrames(), PUSH_CHUNK_FRAMES);
+                            } else if (direttaPtr->getBufferLevel() <= 0.95f) {
+                                // Buffer has space - push one chunk
+                                size_t push = std::min(cacheFrames(), MAX_DECODE_FRAMES);
                                 if (dopDetected) {
                                     DsdProcessor::convertDopToNative(
                                         reinterpret_cast<const uint8_t*>(
@@ -1240,12 +1202,10 @@ int main(int argc, char* argv[]) {
                                 decodeCachePos += push * detectedChannels;
                                 pushedFrames += push;
                             } else {
-                                // Buffer full (>95%) — event-based wait instead
-                                // of blind sleep (reduces jitter from ±1ms to ±50µs)
-                                std::unique_lock<std::mutex> lock(
-                                    direttaPtr->getFlowMutex());
-                                direttaPtr->waitForSpace(lock,
-                                    std::chrono::microseconds(500));
+                                // Buffer full - sleep briefly, then loop back
+                                // to read more HTTP (keeps TCP pipeline flowing)
+                                std::this_thread::sleep_for(
+                                    std::chrono::milliseconds(1));
                             }
                         }
 
@@ -1325,7 +1285,7 @@ int main(int argc, char* argv[]) {
                             }
                             break;
                         }
-                        size_t push = std::min(cacheFrames(), PUSH_CHUNK_FRAMES);
+                        size_t push = std::min(cacheFrames(), MAX_DECODE_FRAMES);
                         if (dopDetected) {
                             DsdProcessor::convertDopToNative(
                                 reinterpret_cast<const uint8_t*>(
