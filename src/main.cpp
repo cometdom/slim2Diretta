@@ -33,7 +33,7 @@
 #include <unistd.h>
 #include <poll.h>
 
-#define SLIM2DIRETTA_VERSION "1.1.1"
+#define SLIM2DIRETTA_VERSION "1.1.0"
 
 // ============================================
 // Async Logging Infrastructure
@@ -351,34 +351,6 @@ int main(int argc, char* argv[]) {
               << "  Native LMS player with Diretta output\n"
               << "═══════════════════════════════════════════════════════\n"
               << std::endl;
-
-    // Log build capabilities for diagnostics
-    {
-        const char* arch =
-#if defined(__aarch64__)
-            "aarch64"
-#elif defined(__x86_64__) || defined(_M_X64)
-            "x86_64"
-#elif defined(__i386__) || defined(_M_IX86)
-            "x86"
-#elif defined(__arm__)
-            "arm"
-#else
-            "unknown"
-#endif
-        ;
-        const char* simd =
-#if DIRETTA_HAS_AVX2
-            "AVX2"
-#elif DIRETTA_HAS_NEON
-            "NEON"
-#else
-            "scalar"
-#endif
-        ;
-        std::cout << "Build: " << arch << " " << simd
-                  << " (" << __DATE__ << ")" << std::endl;
-    }
 
     Config config = parseArguments(argc, argv);
 
@@ -869,12 +841,7 @@ int main(int argc, char* argv[]) {
                         break;  // Exit DSD chaining loop
                       }  // end DSD chaining loop
 
-                      // Only send STMu (track ended) on natural end, not on forced stop
-                      // Sending STMu after strm-q confuses Roon into thinking the
-                      // new seek stream has ended, causing it to skip to the next track
-                      if (audioTestRunning.load(std::memory_order_acquire)) {
-                          slimproto->sendStat(StatEvent::STMu);
-                      }
+                      slimproto->sendStat(StatEvent::STMu);
                       audioThreadDone.store(true, std::memory_order_release);
                       return;
                     }
@@ -926,7 +893,6 @@ int main(int argc, char* argv[]) {
 
                     uint8_t httpBuf[65536];
                     constexpr size_t MAX_DECODE_FRAMES = 1024;
-
                     int32_t decodeBuf[MAX_DECODE_FRAMES * 2];
                     uint64_t totalBytes = 0;
                     bool formatLogged = false;
@@ -936,16 +902,12 @@ int main(int argc, char* argv[]) {
                     // When DirettaSync buffer is full (flow control), we still read
                     // HTTP and decode into this cache. This prevents TCP starvation
                     // that caused underruns with bursty Qobuz streams.
-                    // Max ~3s at 1536kHz stereo = 9216K samples
-                    constexpr size_t DECODE_CACHE_MAX_SAMPLES = 9216000;
+                    // Max ~1s at 1536kHz stereo = 3072K samples
+                    constexpr size_t DECODE_CACHE_MAX_SAMPLES = 3072000;
                     std::vector<int32_t> decodeCache;
                     size_t decodeCachePos = 0;  // Read position (samples consumed)
 
-                    // Adaptive prebuffer: high sample rates (>192kHz) need more margin
-                    // because LMS streams at ~1x real-time at these rates
-                    constexpr unsigned int PREBUFFER_MS_NORMAL = 500;
-                    constexpr unsigned int PREBUFFER_MS_HIGHRATE = 1500;
-                    unsigned int prebufferMs = PREBUFFER_MS_NORMAL;
+                    constexpr unsigned int PREBUFFER_MS = 500;
                     uint64_t pushedFrames = 0;  // Frames actually sent to DirettaSync
                     bool direttaOpened = false;
                     AudioFormat audioFmt{};
@@ -1036,10 +998,6 @@ int main(int argc, char* argv[]) {
                                                      curFormatCode == FORMAT_MP3 ||
                                                      curFormatCode == FORMAT_OGG ||
                                                      curFormatCode == FORMAT_AAC);
-                            // Adapt prebuffer for high sample rates
-                            if (fmt.sampleRate > DirettaBuffer::HIGHRATE_THRESHOLD) {
-                                prebufferMs = PREBUFFER_MS_HIGHRATE;
-                            }
                         }
 
                         // ========== PHASE 3: Prebuffer phase ==========
@@ -1062,7 +1020,7 @@ int main(int argc, char* argv[]) {
 
                             auto fmt = decoder->getFormat();
                             size_t targetFrames = static_cast<size_t>(
-                                fmt.sampleRate) * prebufferMs / 1000;
+                                fmt.sampleRate) * PREBUFFER_MS / 1000;
                             if (cacheFrames() >= targetFrames || httpEof) {
                                 size_t prebufFrames = cacheFrames();
                                 if (prebufFrames == 0) continue;
@@ -1094,21 +1052,16 @@ int main(int argc, char* argv[]) {
                                                   detectedChannels)) {
                                         dopDetected = true;
                                         dopPcmRate = audioFmt.sampleRate;
-                                        uint32_t dsdRate =
-                                            DsdProcessor::calculateDsdRate(
-                                                dopPcmRate, true);
-                                        audioFmt.isDSD = true;
-                                        audioFmt.sampleRate = dsdRate;
-                                        audioFmt.dsdFormat =
-                                            AudioFormat::DSDFormat::DFF;
-                                        dopBuf.resize(MAX_DECODE_FRAMES * 2
-                                                      * detectedChannels);
-                                        LOG_INFO("[Audio] DoP detected — "
-                                            << DsdProcessor::rateName(dsdRate)
-                                            << " (" << dsdRate << " Hz), "
+                                        // DoP passthrough: treat as 24-bit PCM.
+                                        // The GentooPlayer Target receives intact DoP
+                                        // frames via ALSA and forwards them to the DAC.
+                                        // This matches squeeze2upnp→DirettaRendererUPnP
+                                        // which also passes DoP as PCM (isDSD=false).
+                                        audioFmt.isDSD = false;
+                                        audioFmt.bitDepth = 24;
+                                        LOG_INFO("[Audio] DoP detected — passthrough as 24-bit PCM, "
                                             << detectedChannels << " ch, "
-                                            << "carrier " << dopPcmRate
-                                            << " Hz");
+                                            << audioFmt.sampleRate << " Hz carrier");
                                     }
                                 }
 
@@ -1144,23 +1097,10 @@ int main(int argc, char* argv[]) {
                                        audioTestRunning.load(std::memory_order_relaxed)) {
                                     if (direttaPtr->getBufferLevel() > 0.95f) break;
                                     size_t chunk = std::min(remaining, MAX_DECODE_FRAMES);
-                                    if (dopDetected) {
-                                        // Convert DoP → native DSD planar
-                                        DsdProcessor::convertDopToNative(
-                                            reinterpret_cast<const uint8_t*>(ptr),
-                                            dopBuf.data(), chunk,
-                                            detectedChannels);
-                                        size_t dsdBytes = chunk * 2
-                                                          * detectedChannels;
-                                        size_t numDsdSamples =
-                                            dsdBytes * 8 / detectedChannels;
-                                        direttaPtr->sendAudio(
-                                            dopBuf.data(), numDsdSamples);
-                                    } else {
-                                        direttaPtr->sendAudio(
-                                            reinterpret_cast<const uint8_t*>(ptr),
-                                            chunk);
-                                    }
+                                    // DoP passthrough: always send as PCM
+                                    direttaPtr->sendAudio(
+                                        reinterpret_cast<const uint8_t*>(ptr),
+                                        chunk);
                                     ptr += chunk * detectedChannels;
                                     remaining -= chunk;
                                     actualPushed += chunk;
@@ -1181,24 +1121,11 @@ int main(int argc, char* argv[]) {
                             } else if (direttaPtr->getBufferLevel() <= 0.95f) {
                                 // Buffer has space - push one chunk
                                 size_t push = std::min(cacheFrames(), MAX_DECODE_FRAMES);
-                                if (dopDetected) {
-                                    DsdProcessor::convertDopToNative(
-                                        reinterpret_cast<const uint8_t*>(
-                                            decodeCache.data() + decodeCachePos),
-                                        dopBuf.data(), push,
-                                        detectedChannels);
-                                    size_t dsdBytes = push * 2
-                                                      * detectedChannels;
-                                    size_t numDsdSamples =
-                                        dsdBytes * 8 / detectedChannels;
-                                    direttaPtr->sendAudio(
-                                        dopBuf.data(), numDsdSamples);
-                                } else {
-                                    direttaPtr->sendAudio(
-                                        reinterpret_cast<const uint8_t*>(
-                                            decodeCache.data() + decodeCachePos),
-                                        push);
-                                }
+                                // DoP passthrough: always send as PCM
+                                direttaPtr->sendAudio(
+                                    reinterpret_cast<const uint8_t*>(
+                                        decodeCache.data() + decodeCachePos),
+                                    push);
                                 decodeCachePos += push * detectedChannels;
                                 pushedFrames += push;
                             } else {
@@ -1236,9 +1163,8 @@ int main(int argc, char* argv[]) {
 
                         // ========== PHASE 6: Compact cache ==========
                         // Periodically remove consumed samples to prevent
-                        // unbounded growth. Higher threshold = fewer compactions
-                        // = fewer memory stalls (vector::erase is O(n))
-                        if (decodeCachePos > 500000) {
+                        // unbounded growth of the vector
+                        if (decodeCachePos > 100000) {
                             decodeCache.erase(decodeCache.begin(),
                                 decodeCache.begin() + decodeCachePos);
                             decodeCachePos = 0;
@@ -1286,22 +1212,11 @@ int main(int argc, char* argv[]) {
                             break;
                         }
                         size_t push = std::min(cacheFrames(), MAX_DECODE_FRAMES);
-                        if (dopDetected) {
-                            DsdProcessor::convertDopToNative(
-                                reinterpret_cast<const uint8_t*>(
-                                    decodeCache.data() + decodeCachePos),
-                                dopBuf.data(), push, detectedChannels);
-                            size_t dsdBytes = push * 2 * detectedChannels;
-                            size_t numDsdSamples =
-                                dsdBytes * 8 / detectedChannels;
-                            direttaPtr->sendAudio(
-                                dopBuf.data(), numDsdSamples);
-                        } else {
-                            direttaPtr->sendAudio(
-                                reinterpret_cast<const uint8_t*>(
-                                    decodeCache.data() + decodeCachePos),
-                                push);
-                        }
+                        // DoP passthrough: always send as PCM
+                        direttaPtr->sendAudio(
+                            reinterpret_cast<const uint8_t*>(
+                                decodeCache.data() + decodeCachePos),
+                            push);
                         decodeCachePos += push * detectedChannels;
                         pushedFrames += push;
 
@@ -1364,12 +1279,7 @@ int main(int argc, char* argv[]) {
                     }  // end PCM/FLAC chaining loop
                     }  // end PCM/FLAC scope
 
-                    // Only send STMu (track ended) on natural end, not on forced stop
-                    // Sending STMu after strm-q confuses Roon into thinking the
-                    // new seek stream has ended, causing it to skip to the next track
-                    if (audioTestRunning.load(std::memory_order_acquire)) {
-                        slimproto->sendStat(StatEvent::STMu);
-                    }
+                    slimproto->sendStat(StatEvent::STMu);  // Underrun (natural end)
                     audioThreadDone.store(true, std::memory_order_release);
                 });
                 break;
