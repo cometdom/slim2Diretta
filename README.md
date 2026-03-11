@@ -148,7 +148,8 @@ Both tools share the same **DirettaSync v2.0** engine for Diretta output.
 ### Low-Latency Architecture
 - **DirettaSync v2.0**: Shared with squeeze2diretta and DirettaRendererUPnP
 - **Lock-free ring buffers**: SPSC design with SIMD optimizations (AVX2/NEON)
-- **Adaptive prebuffer**: 500ms target with flow control
+- **Optimized audio delivery**: 2048-frame push chunks with event-based flow control and adaptive throttle (aligned with DirettaRendererUPnP)
+- **Adaptive prebuffer**: 500ms (normal) / 1500ms (>192kHz) with flow control
 - **Quick resume**: Same-format track transitions without full reconnection
 - **Clean transitions**: Silence injection on pause/stop/format changes
 - **Auto-release**: Diretta target released after 5s idle for coexistence with other Diretta hosts
@@ -215,7 +216,7 @@ git pull
 sudo systemctl start slim2diretta@1
 ```
 
-> **What's new in v1.1.1:** Fix for Roon seek causing track skip, adaptive buffer sizing for high sample rates (>192kHz), FLAC metadata log spam fix, and build capabilities logging at startup.
+> **What's new in v1.1.1:** Fix for Roon seek causing track skip, adaptive buffer sizing for high sample rates (>192kHz), optimized audio delivery (smoother push pattern, event-based flow control), FLAC metadata log spam fix, and build capabilities logging at startup.
 
 ### From v1.0.0 to v1.1.0
 
@@ -746,4 +747,4 @@ This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) 
 
 **Enjoy native DSD and hi-res PCM streaming from your LMS library!**
 
-*Last updated: 2026-03-10 (v1.1.1)*
+*Last updated: 2026-03-11 (v1.1.1)*
