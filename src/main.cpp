@@ -930,23 +930,26 @@ int main(int argc, char* argv[]) {
                     int32_t decodeBuf[MAX_DECODE_FRAMES * 2];
                     uint64_t totalBytes = 0;
                     bool formatLogged = false;
-                    uint64_t lastElapsedLog = 0;
 
                     // Decode cache: decouples HTTP reading from DirettaSync pushing.
-                    // When DirettaSync buffer is full (flow control), we still read
-                    // HTTP and decode into this cache. This prevents TCP starvation
-                    // that caused underruns with bursty Qobuz streams.
+                    // Two-thread architecture: decode thread fills cache, push thread
+                    // consumes it with adaptive throttle for smooth delivery to Diretta.
                     // Max ~3s at 1536kHz stereo = 9216K samples
                     constexpr size_t DECODE_CACHE_MAX_SAMPLES = 9216000;
                     std::vector<int32_t> decodeCache;
                     size_t decodeCachePos = 0;  // Read position (samples consumed)
+
+                    // Thread synchronization for decode cache
+                    std::mutex cacheMutex;
+                    std::condition_variable cacheReady;
+                    std::atomic<bool> decodeDone{false};
 
                     // Adaptive prebuffer: high sample rates (>192kHz) need more margin
                     // because LMS streams at ~1x real-time at these rates
                     constexpr unsigned int PREBUFFER_MS_NORMAL = 500;
                     constexpr unsigned int PREBUFFER_MS_HIGHRATE = 1500;
                     unsigned int prebufferMs = PREBUFFER_MS_NORMAL;
-                    uint64_t pushedFrames = 0;  // Frames actually sent to DirettaSync
+                    std::atomic<uint64_t> pushedFrames{0};  // Updated by push thread
                     bool direttaOpened = false;
                     AudioFormat audioFmt{};
                     int detectedChannels = 2;
@@ -956,10 +959,144 @@ int main(int argc, char* argv[]) {
                     uint32_t dopPcmRate = 0;  // Original PCM carrier rate for elapsed
                     std::vector<uint8_t> dopBuf;  // Conversion buffer (allocated if DoP)
 
+                    // Push thread handle (launched after prebuffer)
+                    std::thread pushThread;
+
                     // Helper: available frames in decode cache
+                    // Caller must hold cacheMutex when push thread is running
                     auto cacheFrames = [&]() -> size_t {
                         return (decodeCache.size() - decodeCachePos) /
                                std::max(detectedChannels, 1);
+                    };
+
+                    // Push thread body — extracted as lambda to reuse for
+                    // initial prebuffer launch and gapless same-format relaunch
+                    auto launchPushThread = [&]() {
+                        decodeDone.store(false, std::memory_order_release);
+                        if (pushThread.joinable()) pushThread.join();
+
+                        pushThread = std::thread([&]() {
+                            constexpr size_t PUSH_FRAMES = 2048;
+                            // Local buffers to minimize lock hold time
+                            std::vector<int32_t> localBuf(PUSH_FRAMES * 2);
+                            std::vector<uint8_t> localDopBuf;
+                            if (dopDetected) {
+                                localDopBuf.resize(PUSH_FRAMES * 2 * detectedChannels);
+                            }
+                            uint64_t lastLog = 0;
+
+                            while (audioTestRunning.load(std::memory_order_acquire)) {
+                                // Check if decode is done and cache is empty
+                                {
+                                    std::lock_guard<std::mutex> lock(cacheMutex);
+                                    if (decodeDone.load(std::memory_order_acquire) &&
+                                        cacheFrames() == 0) {
+                                        break;
+                                    }
+                                }
+
+                                if (direttaPtr->isPaused()) {
+                                    std::this_thread::sleep_for(
+                                        std::chrono::milliseconds(100));
+                                    continue;
+                                }
+
+                                float bufLevel = direttaPtr->getBufferLevel();
+
+                                // Adaptive throttle (aligned with DirettaRendererUPnP):
+                                // >50%: sleep 10ms then push (smooth, regular pattern)
+                                // 10-50%: push immediately
+                                // <10%: push aggressively (double batch)
+                                // >95%: wait for space (event-based)
+                                if (bufLevel > 0.95f) {
+                                    std::unique_lock<std::mutex> flowLock(
+                                        direttaPtr->getFlowMutex());
+                                    direttaPtr->waitForSpace(flowLock,
+                                        std::chrono::microseconds(500));
+                                    continue;
+                                }
+
+                                if (bufLevel > 0.50f) {
+                                    std::this_thread::sleep_for(
+                                        std::chrono::milliseconds(10));
+                                }
+
+                                // Read chunk from cache (under lock)
+                                size_t push = 0;
+                                {
+                                    std::lock_guard<std::mutex> lock(cacheMutex);
+                                    size_t avail = cacheFrames();
+                                    if (avail == 0) {
+                                        // No data — will wait below
+                                    } else {
+                                        size_t maxPush = PUSH_FRAMES;
+                                        // Double batch when buffer critically low
+                                        if (bufLevel < 0.10f) maxPush *= 2;
+                                        push = std::min(avail, maxPush);
+                                        if (push * detectedChannels > localBuf.size()) {
+                                            localBuf.resize(push * detectedChannels);
+                                        }
+                                        std::memcpy(localBuf.data(),
+                                            decodeCache.data() + decodeCachePos,
+                                            push * detectedChannels * sizeof(int32_t));
+                                        decodeCachePos += push * detectedChannels;
+
+                                        // Compact cache periodically
+                                        if (decodeCachePos > 500000) {
+                                            decodeCache.erase(decodeCache.begin(),
+                                                decodeCache.begin() + decodeCachePos);
+                                            decodeCachePos = 0;
+                                        }
+                                    }
+                                }
+
+                                if (push == 0) {
+                                    // Wait for decode thread to produce data
+                                    std::unique_lock<std::mutex> lock(cacheMutex);
+                                    cacheReady.wait_for(lock,
+                                        std::chrono::milliseconds(5));
+                                    continue;
+                                }
+
+                                // Push to DirettaSync (outside lock — no contention)
+                                if (dopDetected) {
+                                    if (localDopBuf.size() < push * 2 * detectedChannels) {
+                                        localDopBuf.resize(push * 2 * detectedChannels);
+                                    }
+                                    DsdProcessor::convertDopToNative(
+                                        reinterpret_cast<const uint8_t*>(localBuf.data()),
+                                        localDopBuf.data(), push, detectedChannels);
+                                    size_t dsdBytes = push * 2 * detectedChannels;
+                                    size_t numDsdSamples = dsdBytes * 8 / detectedChannels;
+                                    direttaPtr->sendAudio(localDopBuf.data(), numDsdSamples);
+                                } else {
+                                    direttaPtr->sendAudio(
+                                        reinterpret_cast<const uint8_t*>(localBuf.data()),
+                                        push);
+                                }
+
+                                uint64_t frames = pushedFrames.load(std::memory_order_relaxed) + push;
+                                pushedFrames.store(frames, std::memory_order_release);
+
+                                // Update elapsed time
+                                uint32_t elapsedRate = dopDetected ? dopPcmRate : audioFmt.sampleRate;
+                                if (elapsedRate > 0) {
+                                    uint64_t totalMs = frames * 1000 / elapsedRate;
+                                    uint32_t elapsedSec = static_cast<uint32_t>(totalMs / 1000);
+                                    slimproto->updateElapsed(elapsedSec,
+                                        static_cast<uint32_t>(totalMs));
+
+                                    if (elapsedSec >= lastLog + 10) {
+                                        lastLog = elapsedSec;
+                                        std::lock_guard<std::mutex> lock(cacheMutex);
+                                        LOG_DEBUG("[Audio] Elapsed: " << elapsedSec << "s"
+                                            << " (" << frames << " pushed)"
+                                            << " cache=" << cacheFrames() << "f"
+                                            << " buf=" << static_cast<int>(bufLevel * 100) << "%");
+                                    }
+                                }
+                            }
+                        });
                     };
 
                     bool httpEof = false;
@@ -1011,15 +1148,21 @@ int main(int argc, char* argv[]) {
                         // ========== PHASE 1b: Drain decoder into cache ==========
                         // Always drain, even after httpEof — decoder may have
                         // buffered data from previous feed() calls.
-                        if (decodeCache.size() - decodeCachePos <
-                            DECODE_CACHE_MAX_SAMPLES) {
-                            while (true) {
-                                size_t frames = decoder->readDecoded(
-                                    decodeBuf, MAX_DECODE_FRAMES);
-                                if (frames == 0) break;
-                                decodeCache.insert(decodeCache.end(), decodeBuf,
-                                    decodeBuf + frames * detectedChannels);
+                        {
+                            bool appended = false;
+                            std::lock_guard<std::mutex> lock(cacheMutex);
+                            if (decodeCache.size() - decodeCachePos <
+                                DECODE_CACHE_MAX_SAMPLES) {
+                                while (true) {
+                                    size_t frames = decoder->readDecoded(
+                                        decodeBuf, MAX_DECODE_FRAMES);
+                                    if (frames == 0) break;
+                                    decodeCache.insert(decodeCache.end(), decodeBuf,
+                                        decodeBuf + frames * detectedChannels);
+                                    appended = true;
+                                }
                             }
+                            if (appended) cacheReady.notify_one();
                         }
 
                         // ========== PHASE 2: Format detection ==========
@@ -1044,7 +1187,7 @@ int main(int argc, char* argv[]) {
 
                         // ========== PHASE 3: Prebuffer phase ==========
                         if (formatLogged && !direttaOpened) {
-                            // Chained same-format: skip DirettaSync open
+                            // Chained same-format: skip DirettaSync open, restart push thread
                             if (!pcmFirstTrack &&
                                 audioFmt.sampleRate == prevAudioFmt.sampleRate &&
                                 audioFmt.bitDepth == prevAudioFmt.bitDepth &&
@@ -1056,6 +1199,8 @@ int main(int argc, char* argv[]) {
                                         DirettaRingBuffer::S24PackMode::MsbAligned);
                                 }
                                 direttaOpened = true;
+                                pushedFrames.store(0, std::memory_order_release);
+                                launchPushThread();
                                 slimproto->sendStat(StatEvent::STMl);
                                 continue;
                             }
@@ -1166,86 +1311,22 @@ int main(int argc, char* argv[]) {
                                     actualPushed += chunk;
                                 }
                                 decodeCachePos += actualPushed * detectedChannels;
-                                pushedFrames += actualPushed;
+                                pushedFrames.store(actualPushed, std::memory_order_release);
                                 direttaOpened = true;
                                 slimproto->sendStat(StatEvent::STMl);
+
+                                // Launch push thread — handles Phase 4/5/6
+                                // with adaptive throttle aligned to DirettaRendererUPnP
+                                launchPushThread();
                             }
                             continue;  // Stay in prebuffer mode
                         }
 
-                        // ========== PHASE 4: Push from cache to DirettaSync ==========
-                        if (direttaOpened && cacheFrames() > 0) {
-                            if (direttaPtr->isPaused()) {
-                                std::this_thread::sleep_for(
-                                    std::chrono::milliseconds(100));
-                            } else if (direttaPtr->getBufferLevel() <= 0.95f) {
-                                // Buffer has space - push one chunk
-                                size_t push = std::min(cacheFrames(), MAX_DECODE_FRAMES);
-                                if (dopDetected) {
-                                    DsdProcessor::convertDopToNative(
-                                        reinterpret_cast<const uint8_t*>(
-                                            decodeCache.data() + decodeCachePos),
-                                        dopBuf.data(), push,
-                                        detectedChannels);
-                                    size_t dsdBytes = push * 2
-                                                      * detectedChannels;
-                                    size_t numDsdSamples =
-                                        dsdBytes * 8 / detectedChannels;
-                                    direttaPtr->sendAudio(
-                                        dopBuf.data(), numDsdSamples);
-                                } else {
-                                    direttaPtr->sendAudio(
-                                        reinterpret_cast<const uint8_t*>(
-                                            decodeCache.data() + decodeCachePos),
-                                        push);
-                                }
-                                decodeCachePos += push * detectedChannels;
-                                pushedFrames += push;
-                            } else {
-                                // Buffer full - sleep briefly, then loop back
-                                // to read more HTTP (keeps TCP pipeline flowing)
-                                std::this_thread::sleep_for(
-                                    std::chrono::milliseconds(1));
-                            }
-                        }
-
-                        // ========== PHASE 5: Update elapsed time ==========
-                        if (direttaOpened && decoder->isFormatReady()) {
-                            auto fmt = decoder->getFormat();
-                            uint32_t elapsedRate = dopDetected
-                                ? dopPcmRate : fmt.sampleRate;
-                            if (elapsedRate > 0) {
-                                uint64_t totalMs = pushedFrames * 1000 / elapsedRate;
-                                uint32_t elapsedSec = static_cast<uint32_t>(totalMs / 1000);
-                                uint32_t elapsedMs = static_cast<uint32_t>(totalMs);
-                                slimproto->updateElapsed(elapsedSec, elapsedMs);
-
-                                if (elapsedSec >= lastElapsedLog + 10) {
-                                    lastElapsedLog = elapsedSec;
-                                    uint32_t totalSec = fmt.totalSamples > 0
-                                        ? static_cast<uint32_t>(
-                                            fmt.totalSamples / fmt.sampleRate) : 0;
-                                    LOG_DEBUG("[Audio] Elapsed: " << elapsedSec << "s"
-                                        << (totalSec > 0
-                                            ? " / " + std::to_string(totalSec) + "s" : "")
-                                        << " (" << pushedFrames << " pushed)"
-                                        << " cache=" << cacheFrames() << "f");
-                                }
-                            }
-                        }
-
-                        // ========== PHASE 6: Compact cache ==========
-                        // Periodically remove consumed samples to prevent
-                        // unbounded growth. Higher threshold = fewer compactions
-                        // = fewer memory stalls (vector::erase is O(n))
-                        if (decodeCachePos > 500000) {
-                            decodeCache.erase(decodeCache.begin(),
-                                decodeCache.begin() + decodeCachePos);
-                            decodeCachePos = 0;
-                        }
+                        // ========== PHASE 4/5/6: Handled by push thread ==========
 
                         // ========== PHASE 7: Anti-busy-loop ==========
-                        if (!gotData && cacheFrames() == 0 && !httpEof) {
+                        // Decode thread only needs to avoid spinning when no HTTP data
+                        if (!gotData && !httpEof) {
                             std::this_thread::sleep_for(std::chrono::milliseconds(1));
                         }
 
@@ -1263,61 +1344,16 @@ int main(int argc, char* argv[]) {
                            audioTestRunning.load(std::memory_order_acquire)) {
                         size_t frames = decoder->readDecoded(decodeBuf, MAX_DECODE_FRAMES);
                         if (frames == 0) break;
+                        std::lock_guard<std::mutex> lock(cacheMutex);
                         decodeCache.insert(decodeCache.end(), decodeBuf,
                             decodeBuf + frames * detectedChannels);
+                        cacheReady.notify_one();
                     }
 
-                    // Push remaining cache to DirettaSync
-                    while (direttaOpened && cacheFrames() > 0 &&
-                           audioTestRunning.load(std::memory_order_acquire)) {
-                        while (audioTestRunning.load(std::memory_order_acquire)) {
-                            if (direttaPtr->isPaused()) {
-                                std::this_thread::sleep_for(
-                                    std::chrono::milliseconds(100));
-                                continue;
-                            }
-                            if (direttaPtr->getBufferLevel() > 0.95f) {
-                                std::unique_lock<std::mutex> lock(
-                                    direttaPtr->getFlowMutex());
-                                direttaPtr->waitForSpace(lock,
-                                    std::chrono::milliseconds(5));
-                                continue;
-                            }
-                            break;
-                        }
-                        size_t push = std::min(cacheFrames(), MAX_DECODE_FRAMES);
-                        if (dopDetected) {
-                            DsdProcessor::convertDopToNative(
-                                reinterpret_cast<const uint8_t*>(
-                                    decodeCache.data() + decodeCachePos),
-                                dopBuf.data(), push, detectedChannels);
-                            size_t dsdBytes = push * 2 * detectedChannels;
-                            size_t numDsdSamples =
-                                dsdBytes * 8 / detectedChannels;
-                            direttaPtr->sendAudio(
-                                dopBuf.data(), numDsdSamples);
-                        } else {
-                            direttaPtr->sendAudio(
-                                reinterpret_cast<const uint8_t*>(
-                                    decodeCache.data() + decodeCachePos),
-                                push);
-                        }
-                        decodeCachePos += push * detectedChannels;
-                        pushedFrames += push;
-
-                        // Update elapsed during drain
-                        if (decoder->isFormatReady()) {
-                            auto fmt = decoder->getFormat();
-                            uint32_t elapsedRate = dopDetected
-                                ? dopPcmRate : fmt.sampleRate;
-                            if (elapsedRate > 0) {
-                                uint64_t totalMs = pushedFrames * 1000 / elapsedRate;
-                                uint32_t elapsedSec = static_cast<uint32_t>(totalMs / 1000);
-                                uint32_t elapsedMs = static_cast<uint32_t>(totalMs);
-                                slimproto->updateElapsed(elapsedSec, elapsedMs);
-                            }
-                        }
-                    }
+                    // Signal push thread that decode is complete, then wait for it
+                    decodeDone.store(true, std::memory_order_release);
+                    cacheReady.notify_one();
+                    if (pushThread.joinable()) pushThread.join();
 
                     // === GAPLESS: wait for LMS to send next strm-s ===
                     // Ring buffer still has audio being consumed by DAC
