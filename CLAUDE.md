@@ -46,7 +46,7 @@ LMS (network)
   -> slim2diretta (single process)
     -> SlimprotoClient (TCP port 3483) : control
     -> HttpStreamClient (port 9000) : encoded audio stream
-    -> Decoder (FLAC/PCM/DSD)
+    -> Decoder (FLAC/PCM/DSD — native or FFmpeg backend)
     -> DirettaSync (ring buffer + SDK)
       -> Diretta Target (UDP/Ethernet)
         -> DAC
@@ -67,6 +67,10 @@ LMS (network)
 | `src/Decoder.h` | Decoder abstract interface |
 | `src/FlacDecoder.cpp/h` | FLAC decoder (libFLAC) |
 | `src/PcmDecoder.cpp/h` | PCM/WAV/AIFF header parser |
+| `src/Mp3Decoder.cpp/h` | MP3 decoder (libmpg123, optional) |
+| `src/OggDecoder.cpp/h` | Ogg Vorbis decoder (libvorbisfile, optional) |
+| `src/AacDecoder.cpp/h` | AAC decoder (fdk-aac, optional) |
+| `src/FfmpegDecoder.cpp/h` | FFmpeg decoder backend (libavcodec, optional) |
 | `src/DsdProcessor.cpp/h` | DSD conversions (interleaved->planar, DoP->native) |
 | `diretta/DirettaSync.cpp/h` | Diretta SDK wrapper (shared with squeeze2diretta) |
 | `diretta/DirettaRingBuffer.h` | Lock-free SPSC ring buffer |
@@ -115,6 +119,8 @@ Key messages: HELO (registration), STAT (status), strm (stream control), audg (v
 - **libFLAC** (BSD-3-Clause) for FLAC decoding
 - **POSIX threads** (pthreads)
 - **C++17 runtime**
+- **Optional**: libmpg123 (MP3), libvorbis (Ogg), fdk-aac (AAC)
+- **Optional**: libavcodec + libavutil (FFmpeg decoder backend, `--decoder ffmpeg`)
 
 SDK locations searched (in order):
 1. `$DIRETTA_SDK_PATH`

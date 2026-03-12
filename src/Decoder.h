@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <cstddef>
 #include <memory>
+#include <string>
 
 struct DecodedFormat {
     uint32_t sampleRate = 0;
@@ -93,9 +94,11 @@ public:
     /**
      * @brief Create decoder for the given Slimproto format code
      * @param formatCode 'f' = FLAC, 'p' = PCM (WAV/AIFF), 'a' = AAC, etc.
+     * @param backend "native" (default) or "ffmpeg" for FFmpeg-based decoding
      * @return Decoder instance, or nullptr for unsupported formats
      */
-    static std::unique_ptr<Decoder> create(char formatCode);
+    static std::unique_ptr<Decoder> create(char formatCode,
+                                            const std::string& backend = "native");
 };
 
 #endif // SLIM2DIRETTA_DECODER_H

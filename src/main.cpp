@@ -33,7 +33,7 @@
 #include <unistd.h>
 #include <poll.h>
 
-#define SLIM2DIRETTA_VERSION "1.1.1"
+#define SLIM2DIRETTA_VERSION "1.2.0"
 
 // ============================================
 // Async Logging Infrastructure
@@ -234,6 +234,13 @@ Config parseArguments(int argc, char* argv[]) {
         else if (arg == "--no-dsd") {
             config.dsdEnabled = false;
         }
+        else if (arg == "--decoder" && i + 1 < argc) {
+            config.decoderBackend = argv[++i];
+            if (config.decoderBackend != "native" && config.decoderBackend != "ffmpeg") {
+                std::cerr << "Invalid decoder backend. Use: native, ffmpeg" << std::endl;
+                exit(1);
+            }
+        }
         else if (arg == "--list-targets" || arg == "-l") {
             config.listTargets = true;
         }
@@ -275,6 +282,7 @@ Config parseArguments(int argc, char* argv[]) {
                       << "Audio:\n"
                       << "  --max-rate <hz>        Max sample rate (default: 1536000)\n"
                       << "  --no-dsd               Disable DSD support\n"
+                      << "  --decoder <backend>    Decoder backend: native (default), ffmpeg\n"
                       << "\n"
                       << "Logging:\n"
                       << "  -v, --verbose          Debug output (log level: DEBUG)\n"
@@ -380,7 +388,27 @@ int main(int argc, char* argv[]) {
                   << " (" << __DATE__ << ")" << std::endl;
     }
 
+    // Log decoder backend info
+    std::cout << "Codecs: FLAC PCM"
+#ifdef ENABLE_MP3
+              << " MP3"
+#endif
+#ifdef ENABLE_OGG
+              << " OGG"
+#endif
+#ifdef ENABLE_AAC
+              << " AAC"
+#endif
+#ifdef ENABLE_FFMPEG
+              << " [FFmpeg available]"
+#endif
+              << " DSD" << std::endl;
+
     Config config = parseArguments(argc, argv);
+
+    if (config.decoderBackend == "ffmpeg") {
+        std::cout << "Decoder: FFmpeg backend" << std::endl;
+    }
 
     // Apply log level
     if (config.verbose) {
@@ -609,7 +637,7 @@ int main(int argc, char* argv[]) {
                 char pcmEndian = cmd.pcmEndian;
                 audioTestRunning.store(true);
                 audioThreadDone.store(false, std::memory_order_release);
-                audioTestThread = std::thread([&httpStream, &slimproto, &audioTestRunning, &audioThreadDone, &hasPendingTrack, &pendingMutex, &pendingNextTrack, formatCode, pcmRate, pcmSize, pcmChannels, pcmEndian, direttaPtr]() {
+                audioTestThread = std::thread([&httpStream, &slimproto, &audioTestRunning, &audioThreadDone, &hasPendingTrack, &pendingMutex, &pendingNextTrack, formatCode, pcmRate, pcmSize, pcmChannels, pcmEndian, direttaPtr, &config]() {
 
                     // ============================================================
                     // DSD PATH — separate from PCM/FLAC
@@ -894,7 +922,7 @@ int main(int argc, char* argv[]) {
                     while (true) {  // === PCM/FLAC CHAINING LOOP ===
 
                     // Create decoder for this format
-                    auto decoder = Decoder::create(curFormatCode);
+                    auto decoder = Decoder::create(curFormatCode, config.decoderBackend);
                     if (!decoder) {
                         LOG_ERROR("[Audio] Unsupported format: " << curFormatCode);
                         slimproto->sendStat(StatEvent::STMn);
