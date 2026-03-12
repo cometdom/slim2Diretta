@@ -42,6 +42,18 @@
                     "default": ""
                 },
                 {
+                    "key": "decoder",
+                    "type": "select",
+                    "cli_arg": "--decoder",
+                    "label": "Decoder Backend",
+                    "description": "Audio decoder: native (libFLAC) or ffmpeg. FFmpeg may sound different due to its internal processing pipeline.",
+                    "default": "",
+                    "options": [
+                        {"value": "", "label": "Native (default — libFLAC/libmpg123/libvorbis)"},
+                        {"value": "ffmpeg", "label": "FFmpeg (libavcodec)"}
+                    ]
+                },
+                {
                     "key": "verbose",
                     "type": "boolean",
                     "cli_arg": "-v",
