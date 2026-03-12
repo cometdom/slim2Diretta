@@ -2,7 +2,34 @@
 
 All notable changes to slim2diretta are documented in this file.
 
-## v1.1.1 (2026-03-11)
+## v1.2.0 (2026-03-12)
+
+### Added
+
+- **FFmpeg decoder backend** (`--decoder ffmpeg`): Alternative audio decoder using FFmpeg's libavcodec. Users can switch between the native backend (libFLAC/libmpg123/libvorbis) and FFmpeg for a different sonic signature. The native backend offers a brighter, more detailed sound; FFmpeg provides a warmer, more enveloping presentation with a wider soundstage. Both are lossless and theoretically bit-identical — the perceived difference likely stems from internal processing patterns (memory allocation, frame buffering, decode timing).
+  - Parser-based architecture (no avformat needed) — lightweight, only libavcodec + libavutil
+  - Supports FLAC, MP3, AAC, OGG, ALAC, PCM via a single unified decoder
+  - DSD remains handled natively (raw bitstream, not decoded)
+  - Selectable via CLI (`--decoder ffmpeg`) or Web UI (Decoder Backend dropdown)
+  - Build-time optional: auto-detected, graceful fallback to native if FFmpeg not installed
+
+- **Startup codec listing**: Build capabilities now show all available codecs and FFmpeg availability at startup
+
+### Build Dependencies
+
+New optional dependency for FFmpeg backend:
+
+| Distribution | Command |
+|-------------|---------|
+| **Fedora** | `sudo dnf install ffmpeg-free-devel` |
+| **Ubuntu/Debian** | `sudo apt install libavcodec-dev libavutil-dev` |
+| **Arch** | `sudo pacman -S ffmpeg` |
+
+To disable FFmpeg backend: `cmake -DENABLE_FFMPEG=OFF ..`
+
+---
+
+## v1.1.1 (2026-03-11) — internal release, not published
 
 ### Fixed
 
