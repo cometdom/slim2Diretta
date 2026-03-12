@@ -217,12 +217,11 @@ Both backends produce lossless output. The sonic difference is subtle and stems 
 sudo systemctl stop slim2diretta@1
 
 # 2. Install FFmpeg development libraries (optional, for FFmpeg backend)
-# Fedora:
-sudo dnf install ffmpeg-free-devel
-# Ubuntu/Debian:
-sudo apt install libavcodec-dev libavutil-dev
-# Arch:
-sudo pacman -S ffmpeg
+./install.sh --codecs
+# Or manually:
+#   Fedora:  sudo dnf install ffmpeg-free-devel
+#   Ubuntu:  sudo apt install libavcodec-dev libavutil-dev
+#   Arch:    sudo pacman -S ffmpeg
 
 # 3. Pull the latest version
 cd ~/slim2diretta
@@ -306,13 +305,14 @@ chmod +x install.sh
 > ```
 
 The installer provides an interactive menu with options for:
-- **Full installation** (recommended) - Dependencies, build, and systemd service
+- **Full installation** (recommended) - Dependencies, optional codecs, build, and systemd service
 - **Build only** - Compile slim2diretta (if dependencies are already installed)
 - **Install systemd service** - Set up automatic startup
 - **Update binary** - Rebuild and replace after code changes
 - **Configure network** - MTU, buffers, and firewall
 - **Test** - Verify installation and list Diretta targets
 - **Install web configuration UI** - Browser-based settings (port 8081)
+- **Install optional codecs** - MP3, OGG, AAC libraries and FFmpeg backend
 - **Aggressive optimization** (Fedora only) - For dedicated audio servers
 - **Uninstall** - Clean removal
 
@@ -323,6 +323,7 @@ The installer provides an interactive menu with options for:
 ./install.sh --service    # Install systemd service only
 ./install.sh --update     # Rebuild and update installed binary
 ./install.sh --webui      # Install web configuration UI
+./install.sh --codecs     # Install optional codec libraries (MP3, OGG, AAC, FFmpeg)
 ./install.sh --uninstall  # Remove slim2diretta
 ./install.sh --help       # Show all options
 ```
