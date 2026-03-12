@@ -28,7 +28,7 @@ std::unique_ptr<Decoder> Decoder::create(char formatCode,
     // FFmpeg backend handles all formats except DSD (raw bitstream)
     if (backend == "ffmpeg" && formatCode != FORMAT_DSD) {
         LOG_DEBUG("[Decoder] Using FFmpeg backend for format '" << formatCode << "'");
-        return std::make_unique<FfmpegDecoder>();
+        return std::make_unique<FfmpegDecoder>(formatCode);
     }
 #else
     if (backend == "ffmpeg") {
