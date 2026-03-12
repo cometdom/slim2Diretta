@@ -15,6 +15,10 @@ All notable changes to slim2diretta are documented in this file.
 
 - **Startup codec listing**: Build capabilities now show all available codecs and FFmpeg availability at startup
 
+### Fixed
+
+- **DSD64 DoP playback**: Fixed continuous ~485 Hz whistle tone when playing DSD64 via Roon (DoP). DoP frames are now passed through as 24-bit PCM to the Diretta Target, which handles DoP marker detection and DAC forwarding natively. Previously, `convertDopToNative()` destroyed the DoP markers causing frame misalignment. This matches the working behavior of squeeze2upnp→DirettaRendererUPnP. (Credit: hoorna, PR #4)
+
 ### Build Dependencies
 
 New optional dependency for FFmpeg backend:

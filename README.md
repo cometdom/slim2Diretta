@@ -62,7 +62,7 @@ Both tools share the same **DirettaSync v2.0** engine for Diretta output.
 ### Why Use This?
 
 - **Simplified setup**: Single binary, no Squeezelite to patch and compile
-- **Native DSD playback**: DSF, DFF, and DoP (Roon) to native DSD
+- **Native DSD playback**: DSF, DFF, and DoP passthrough (Roon compatibility)
 - **Bit-perfect streaming**: Bypasses OS audio stack entirely
 - **High-resolution PCM**: Up to 1536kHz/32-bit
 - **Low latency**: DirettaSync v2.0 with lock-free ring buffers and SIMD
@@ -135,7 +135,7 @@ Both tools share the same **DirettaSync v2.0** engine for Diretta output.
 - **PCM**: WAV, AIFF containers + raw PCM (Roon)
 - **Native DSD**: DSF (LSB-first) and DFF/DSDIFF (MSB-first)
 - **DSD rates**: DSD64, DSD128, DSD256, DSD512, DSD1024
-- **DoP**: Automatic detection and conversion to native DSD (Roon compatibility)
+- **DoP**: Automatic detection and passthrough as 24-bit PCM (Roon compatibility). The Diretta Target handles DoP marker detection and forwarding to the DAC
 - **Bit-perfect**: Volume forced to 100%, no processing
 
 ### Decoder Backends
@@ -146,7 +146,7 @@ Both backends produce lossless output. The sonic difference is subtle and stems 
 
 ### DSD Handling
 - **Native DSD streaming**: Direct DSD bitstream from LMS (format code `d`)
-- **DoP auto-detection**: Transparent conversion from PCM-wrapped DSD (Roon)
+- **DoP auto-detection**: Passthrough as 24-bit PCM to Diretta Target (Roon)
 - **Container parsing**: DSF and DFF headers parsed in-stream
 - **Dynamic conversion**: Planar, bit-reverse, byte-swap as needed by DAC
 - **All rates**: DSD64 (2.8MHz) to DSD1024 (45.2MHz)
@@ -659,7 +659,7 @@ slim2diretta works with **Roon** in Squeezebox emulation mode:
 - Roon uses an older Slimproto protocol (LMS 6.0.x era)
 - PCM is limited to **24-bit / 192kHz**
 - DSD is sent as **DoP** (DSD over PCM), up to **DSD128**
-- slim2diretta **automatically detects DoP** and converts to native DSD
+- slim2diretta **automatically detects DoP** and passes it through as 24-bit PCM to the Diretta Target, which handles the DoP→DAC forwarding
 
 No special configuration needed for Roon. Simply enable Squeezebox support in Roon and slim2diretta will appear as a player.
 

@@ -981,8 +981,6 @@ int main(int argc, char* argv[]) {
 
                     // DoP (DSD over PCM) detection — Roon sends DSD as DoP
                     bool dopDetected = false;
-                    uint32_t dopPcmRate = 0;  // Original PCM carrier rate for elapsed
-                    std::vector<uint8_t> dopBuf;  // Conversion buffer (allocated if DoP)
 
                     // Helper: available frames in decode cache
                     auto cacheFrames = [&]() -> size_t {
@@ -1079,10 +1077,8 @@ int main(int argc, char* argv[]) {
                                 audioFmt.channels == prevAudioFmt.channels &&
                                 audioFmt.isDSD == prevAudioFmt.isDSD) {
                                 LOG_INFO("[Gapless] PCM same format, continuing ring buffer");
-                                if (!dopDetected) {
-                                    direttaPtr->setS24PackModeHint(
-                                        DirettaRingBuffer::S24PackMode::MsbAligned);
-                                }
+                                direttaPtr->setS24PackModeHint(
+                                    DirettaRingBuffer::S24PackMode::MsbAligned);
                                 direttaOpened = true;
                                 slimproto->sendStat(StatEvent::STMl);
                                 continue;
@@ -1121,22 +1117,16 @@ int main(int argc, char* argv[]) {
                                     if (detectDoP(samples, cacheFrames(),
                                                   detectedChannels)) {
                                         dopDetected = true;
-                                        dopPcmRate = audioFmt.sampleRate;
-                                        uint32_t dsdRate =
-                                            DsdProcessor::calculateDsdRate(
-                                                dopPcmRate, true);
-                                        audioFmt.isDSD = true;
-                                        audioFmt.sampleRate = dsdRate;
-                                        audioFmt.dsdFormat =
-                                            AudioFormat::DSDFormat::DFF;
-                                        dopBuf.resize(MAX_DECODE_FRAMES * 2
-                                                      * detectedChannels);
-                                        LOG_INFO("[Audio] DoP detected — "
-                                            << DsdProcessor::rateName(dsdRate)
-                                            << " (" << dsdRate << " Hz), "
+                                        // DoP passthrough: treat as 24-bit PCM.
+                                        // The Diretta Target receives intact DoP
+                                        // frames via ALSA and forwards them to the
+                                        // DAC. Matches squeeze2upnp→DirettaRendererUPnP
+                                        // which also passes DoP as PCM (isDSD=false).
+                                        audioFmt.isDSD = false;
+                                        audioFmt.bitDepth = 24;
+                                        LOG_INFO("[Audio] DoP detected — passthrough as 24-bit PCM, "
                                             << detectedChannels << " ch, "
-                                            << "carrier " << dopPcmRate
-                                            << " Hz");
+                                            << audioFmt.sampleRate << " Hz carrier");
                                     }
                                 }
 
@@ -1149,18 +1139,15 @@ int main(int argc, char* argv[]) {
                                     }
                                     break;
                                 }
-                                if (!dopDetected) {
-                                    // Set S24 pack mode hint AFTER open() — open()
-                                    // calls clear() which resets the hint. Our decoders
-                                    // always output MSB-aligned int32_t samples.
-                                    // Not needed for DoP (DSD mode uses byte push).
-                                    direttaPtr->setS24PackModeHint(
-                                        DirettaRingBuffer::S24PackMode::MsbAligned);
-                                }
+                                // Set S24 pack mode hint AFTER open() — open()
+                                // calls clear() which resets the hint. Our decoders
+                                // always output MSB-aligned int32_t samples.
+                                // DoP passthrough also uses this (24-bit PCM mode).
+                                direttaPtr->setS24PackModeHint(
+                                    DirettaRingBuffer::S24PackMode::MsbAligned);
 
                                 uint32_t prebufMs = static_cast<uint32_t>(
-                                    prebufFrames * 1000 / (dopDetected
-                                        ? dopPcmRate : fmt.sampleRate));
+                                    prebufFrames * 1000 / fmt.sampleRate);
                                 LOG_INFO("[Audio] Pre-buffered " << prebufFrames
                                          << " frames (" << prebufMs << "ms)");
 
@@ -1172,23 +1159,10 @@ int main(int argc, char* argv[]) {
                                        audioTestRunning.load(std::memory_order_relaxed)) {
                                     if (direttaPtr->getBufferLevel() > 0.95f) break;
                                     size_t chunk = std::min(remaining, MAX_DECODE_FRAMES);
-                                    if (dopDetected) {
-                                        // Convert DoP → native DSD planar
-                                        DsdProcessor::convertDopToNative(
-                                            reinterpret_cast<const uint8_t*>(ptr),
-                                            dopBuf.data(), chunk,
-                                            detectedChannels);
-                                        size_t dsdBytes = chunk * 2
-                                                          * detectedChannels;
-                                        size_t numDsdSamples =
-                                            dsdBytes * 8 / detectedChannels;
-                                        direttaPtr->sendAudio(
-                                            dopBuf.data(), numDsdSamples);
-                                    } else {
-                                        direttaPtr->sendAudio(
-                                            reinterpret_cast<const uint8_t*>(ptr),
-                                            chunk);
-                                    }
+                                    // DoP passthrough: always send as PCM
+                                    direttaPtr->sendAudio(
+                                        reinterpret_cast<const uint8_t*>(ptr),
+                                        chunk);
                                     ptr += chunk * detectedChannels;
                                     remaining -= chunk;
                                     actualPushed += chunk;
@@ -1209,24 +1183,11 @@ int main(int argc, char* argv[]) {
                             } else if (direttaPtr->getBufferLevel() <= 0.95f) {
                                 // Buffer has space - push one chunk
                                 size_t push = std::min(cacheFrames(), MAX_DECODE_FRAMES);
-                                if (dopDetected) {
-                                    DsdProcessor::convertDopToNative(
-                                        reinterpret_cast<const uint8_t*>(
-                                            decodeCache.data() + decodeCachePos),
-                                        dopBuf.data(), push,
-                                        detectedChannels);
-                                    size_t dsdBytes = push * 2
-                                                      * detectedChannels;
-                                    size_t numDsdSamples =
-                                        dsdBytes * 8 / detectedChannels;
-                                    direttaPtr->sendAudio(
-                                        dopBuf.data(), numDsdSamples);
-                                } else {
-                                    direttaPtr->sendAudio(
-                                        reinterpret_cast<const uint8_t*>(
-                                            decodeCache.data() + decodeCachePos),
-                                        push);
-                                }
+                                // DoP passthrough: always send as PCM
+                                direttaPtr->sendAudio(
+                                    reinterpret_cast<const uint8_t*>(
+                                        decodeCache.data() + decodeCachePos),
+                                    push);
                                 decodeCachePos += push * detectedChannels;
                                 pushedFrames += push;
                             } else {
@@ -1240,8 +1201,7 @@ int main(int argc, char* argv[]) {
                         // ========== PHASE 5: Update elapsed time ==========
                         if (direttaOpened && decoder->isFormatReady()) {
                             auto fmt = decoder->getFormat();
-                            uint32_t elapsedRate = dopDetected
-                                ? dopPcmRate : fmt.sampleRate;
+                            uint32_t elapsedRate = fmt.sampleRate;
                             if (elapsedRate > 0) {
                                 uint64_t totalMs = pushedFrames * 1000 / elapsedRate;
                                 uint32_t elapsedSec = static_cast<uint32_t>(totalMs / 1000);
@@ -1314,30 +1274,18 @@ int main(int argc, char* argv[]) {
                             break;
                         }
                         size_t push = std::min(cacheFrames(), MAX_DECODE_FRAMES);
-                        if (dopDetected) {
-                            DsdProcessor::convertDopToNative(
-                                reinterpret_cast<const uint8_t*>(
-                                    decodeCache.data() + decodeCachePos),
-                                dopBuf.data(), push, detectedChannels);
-                            size_t dsdBytes = push * 2 * detectedChannels;
-                            size_t numDsdSamples =
-                                dsdBytes * 8 / detectedChannels;
-                            direttaPtr->sendAudio(
-                                dopBuf.data(), numDsdSamples);
-                        } else {
-                            direttaPtr->sendAudio(
-                                reinterpret_cast<const uint8_t*>(
-                                    decodeCache.data() + decodeCachePos),
-                                push);
-                        }
+                        // DoP passthrough: always send as PCM
+                        direttaPtr->sendAudio(
+                            reinterpret_cast<const uint8_t*>(
+                                decodeCache.data() + decodeCachePos),
+                            push);
                         decodeCachePos += push * detectedChannels;
                         pushedFrames += push;
 
                         // Update elapsed during drain
                         if (decoder->isFormatReady()) {
                             auto fmt = decoder->getFormat();
-                            uint32_t elapsedRate = dopDetected
-                                ? dopPcmRate : fmt.sampleRate;
+                            uint32_t elapsedRate = fmt.sampleRate;
                             if (elapsedRate > 0) {
                                 uint64_t totalMs = pushedFrames * 1000 / elapsedRate;
                                 uint32_t elapsedSec = static_cast<uint32_t>(totalMs / 1000);
