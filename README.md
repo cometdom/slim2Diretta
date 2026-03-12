@@ -1,4 +1,4 @@
-# slim2diretta v1.1.1
+# slim2diretta v1.2.0
 
 **Native LMS Player with Diretta Output - Mono-Process Architecture**
 
@@ -8,7 +8,7 @@
 
 ---
 
-![Version](https://img.shields.io/badge/version-1.1.1-blue.svg)
+![Version](https://img.shields.io/badge/version-1.2.0-blue.svg)
 ![DSD](https://img.shields.io/badge/DSD-Native-green.svg)
 ![SDK](https://img.shields.io/badge/SDK-DIRETTA::Sync-orange.svg)
 
@@ -102,6 +102,10 @@ Both tools share the same **DirettaSync v2.0** engine for Diretta output.
 |  | - PCM/WAV/AIFF    |                                     |
 |  | - DSD (DSF/DFF)   |                                     |
 |  | - DoP detection   |                                     |
+|  |                   |                                     |
+|  | FFmpeg backend:   |                                     |
+|  | - --decoder ffmpeg|                                     |
+|  | - libavcodec      |                                     |
 |  +-------------------+                                     |
 +--------------------------------------------+---------------+
                                              |
@@ -133,6 +137,12 @@ Both tools share the same **DirettaSync v2.0** engine for Diretta output.
 - **DSD rates**: DSD64, DSD128, DSD256, DSD512, DSD1024
 - **DoP**: Automatic detection and conversion to native DSD (Roon compatibility)
 - **Bit-perfect**: Volume forced to 100%, no processing
+
+### Decoder Backends
+- **Native** (default): Dedicated libraries (libFLAC, libmpg123, libvorbis, fdk-aac) — brighter, more detailed sound
+- **FFmpeg** (`--decoder ffmpeg`): Unified decoder via libavcodec — warmer, wider soundstage
+
+Both backends produce lossless output. The sonic difference is subtle and stems from internal processing patterns. Switch between them to find your preference.
 
 ### DSD Handling
 - **Native DSD streaming**: Direct DSD bitstream from LMS (format code `d`)
@@ -194,29 +204,44 @@ Both tools share the same **DirettaSync v2.0** engine for Diretta output.
 - **Build tools**: gcc/g++ 7.0+, make, CMake 3.10+
 - **Required library**: libFLAC
 - **Optional libraries** (for internet radio): libmpg123 (MP3), libvorbis (Ogg), fdk-aac (AAC)
+- **Optional library** (for FFmpeg backend): libavcodec, libavutil
 
 ---
 
 ## Upgrading
 
-### From v1.1.0 to v1.1.1
+### From v1.1.x to v1.2.0
 
 ```bash
 # 1. Stop the service
 sudo systemctl stop slim2diretta@1
 
-# 2. Pull the latest version
+# 2. Install FFmpeg development libraries (optional, for FFmpeg backend)
+# Fedora:
+sudo dnf install ffmpeg-free-devel
+# Ubuntu/Debian:
+sudo apt install libavcodec-dev libavutil-dev
+# Arch:
+sudo pacman -S ffmpeg
+
+# 3. Pull the latest version
 cd ~/slim2diretta
 git pull
 
-# 3. Rebuild and update the binary
-./install.sh --update
+# 4. Rebuild (re-run cmake to detect new libraries)
+cd build
+cmake ..
+make -j$(nproc)
 
-# 4. Restart the service
+# 5. Update the installed binary
+sudo cp slim2diretta /usr/local/bin/
+# Or use: ./install.sh --update
+
+# 6. Restart the service
 sudo systemctl start slim2diretta@1
 ```
 
-> **What's new in v1.1.1:** Fix for Roon seek causing track skip, adaptive buffer sizing for high sample rates (>192kHz), optimized audio delivery (smoother push pattern, event-based flow control), FLAC metadata log spam fix, and build capabilities logging at startup.
+> **What's new in v1.2.0:** FFmpeg decoder backend (`--decoder ffmpeg`) as an alternative to the native decoders. Users report a warmer, more enveloping sound with FFmpeg compared to the brighter native backend. Switch via CLI or Web UI. Also includes all v1.1.1 fixes (Roon seek, high sample rate buffers, FLAC log spam).
 
 ### From v1.0.0 to v1.1.0
 
@@ -314,6 +339,8 @@ The installer provides an interactive menu with options for:
 sudo dnf install -y gcc-c++ make cmake pkg-config flac-devel
 # Optional codecs (recommended for internet radio)
 sudo dnf install -y mpg123-devel libvorbis-devel fdk-aac-free-devel
+# Optional FFmpeg backend
+sudo dnf install -y ffmpeg-free-devel
 ```
 
 **Ubuntu/Debian:**
@@ -322,6 +349,8 @@ sudo dnf install -y mpg123-devel libvorbis-devel fdk-aac-free-devel
 sudo apt install -y build-essential cmake pkg-config libflac-dev
 # Optional codecs (recommended for internet radio)
 sudo apt install -y libmpg123-dev libvorbis-dev libfdk-aac-dev
+# Optional FFmpeg backend
+sudo apt install -y libavcodec-dev libavutil-dev
 ```
 
 **Arch/AudioLinux:**
@@ -330,9 +359,11 @@ sudo apt install -y libmpg123-dev libvorbis-dev libfdk-aac-dev
 sudo pacman -S base-devel cmake pkgconf flac
 # Optional codecs (recommended for internet radio)
 sudo pacman -S mpg123 libvorbis libfdk-aac
+# Optional FFmpeg backend
+sudo pacman -S ffmpeg
 ```
 
-> **Note**: Codec libraries are optional. If a library is not found at build time, the corresponding codec is simply disabled. FLAC and PCM are always available.
+> **Note**: Codec libraries are optional. If a library is not found at build time, the corresponding codec is simply disabled. FLAC and PCM are always available. The FFmpeg backend is also optional — if not installed, the `--decoder ffmpeg` option is unavailable.
 
 #### 2. Download Diretta Host SDK
 
@@ -441,6 +472,7 @@ Options:
   --version                      Show version and exit
   --max-rate <hz>                Max PCM sample rate (default: 1536000)
   --no-dsd                       Disable DSD support
+  --decoder <backend>            Decoder backend: native (default), ffmpeg
 
 Diretta Advanced Options:
   --transfer-mode <mode>         Transfer scheduling mode (default: auto)
@@ -601,7 +633,7 @@ slim2diretta supports internet radio playback via the following codecs:
 
 All codecs include **error recovery** for robust radio streaming (automatic resync on corrupted frames, gap handling).
 
-CMake reports the codec status during build:
+CMake reports the codec and backend status during build:
 ```
 -- Codecs:
 --   FLAC:           ENABLED (always)
@@ -609,9 +641,13 @@ CMake reports the codec status during build:
 --   MP3:            ENABLED (libmpg123)
 --   Ogg Vorbis:     ENABLED (libvorbisfile)
 --   AAC:            ENABLED (fdk-aac)
+--
+-- Backends:
+--   FFmpeg:         ENABLED (--decoder ffmpeg)
 ```
 
 To disable a specific codec: `cmake -DENABLE_MP3=OFF ..`
+To disable FFmpeg backend: `cmake -DENABLE_FFMPEG=OFF ..`
 
 ---
 
@@ -747,4 +783,4 @@ This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) 
 
 **Enjoy native DSD and hi-res PCM streaming from your LMS library!**
 
-*Last updated: 2026-03-11 (v1.1.1)*
+*Last updated: 2026-03-12 (v1.2.0)*

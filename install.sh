@@ -143,6 +143,79 @@ install_dependencies() {
     print_success "Build dependencies installed"
 }
 
+install_optional_codecs() {
+    print_header "Installing Optional Codec Libraries"
+
+    echo ""
+    echo "Optional codecs extend format support beyond FLAC/PCM/DSD."
+    echo "FFmpeg backend provides an alternative decoder with a different"
+    echo "sonic signature (warmer, wider soundstage vs native's brighter detail)."
+    echo ""
+    echo "  1) All optional codecs + FFmpeg backend (recommended)"
+    echo "  2) FFmpeg backend only (libavcodec)"
+    echo "  3) Extra codecs only (MP3, OGG, AAC — no FFmpeg)"
+    echo "  4) Skip"
+    echo ""
+    read -rp "Choice [1-4]: " codec_choice
+
+    case $codec_choice in
+        1) local install_ffmpeg=true; local install_codecs=true ;;
+        2) local install_ffmpeg=true; local install_codecs=false ;;
+        3) local install_ffmpeg=false; local install_codecs=true ;;
+        4|*) print_info "Skipping optional codecs"; return 0 ;;
+    esac
+
+    case $OS in
+        fedora|rhel|centos)
+            local pkgs=""
+            if $install_codecs; then
+                pkgs="mpg123-devel libvorbis-devel fdk-aac-free-devel"
+            fi
+            if $install_ffmpeg; then
+                pkgs="$pkgs ffmpeg-free-devel"
+            fi
+            print_info "Installing: $pkgs"
+            sudo dnf install -y $pkgs
+            ;;
+        ubuntu|debian)
+            local pkgs=""
+            if $install_codecs; then
+                pkgs="libmpg123-dev libvorbis-dev libfdk-aac-dev"
+            fi
+            if $install_ffmpeg; then
+                pkgs="$pkgs libavcodec-dev libavutil-dev"
+            fi
+            print_info "Installing: $pkgs"
+            sudo apt install -y $pkgs
+            ;;
+        arch|archarm|manjaro)
+            local pkgs=""
+            if $install_codecs; then
+                pkgs="mpg123 libvorbis libfdk-aac"
+            fi
+            if $install_ffmpeg; then
+                pkgs="$pkgs ffmpeg"
+            fi
+            print_info "Installing: $pkgs"
+            sudo pacman -Sy --needed --noconfirm $pkgs
+            ;;
+        *)
+            print_warning "Unsupported distribution for automatic codec install"
+            print_info "Install manually:"
+            if $install_codecs; then
+                print_info "  - libmpg123-dev, libvorbis-dev, libfdk-aac-dev"
+            fi
+            if $install_ffmpeg; then
+                print_info "  - libavcodec-dev, libavutil-dev (FFmpeg)"
+            fi
+            return 0
+            ;;
+    esac
+
+    print_success "Optional codec libraries installed"
+    print_info "Rebuild slim2diretta for changes to take effect"
+}
+
 # =============================================================================
 # DIRETTA SDK
 # =============================================================================
@@ -882,8 +955,11 @@ show_main_menu() {
     echo "  7) Install web configuration UI"
     echo "     - Browser-based settings (port 8081)"
     echo ""
+    echo "  8) Install optional codecs (MP3, OGG, AAC, FFmpeg)"
+    echo "     - Extra codec libraries for extended format support"
+    echo ""
     if [ "$OS" = "fedora" ]; then
-    echo "  8) Aggressive Fedora optimization"
+    echo "  9) Aggressive Fedora optimization"
     echo "     - For dedicated audio servers only"
     echo ""
     fi
@@ -894,6 +970,7 @@ show_main_menu() {
 
 run_full_installation() {
     install_dependencies
+    install_optional_codecs
     check_diretta_sdk
     build_slim2diretta
     configure_network
@@ -963,6 +1040,10 @@ main() {
             setup_webui
             exit 0
             ;;
+        --codecs|-c)
+            install_optional_codecs
+            exit 0
+            ;;
         --optimize|-o)
             optimize_fedora_aggressive
             exit 0
@@ -982,6 +1063,7 @@ main() {
             echo "  --network, -n       Configure network only"
             echo "  --test, -t          Test installation"
             echo "  --webui, -w         Install web configuration UI"
+            echo "  --codecs, -c        Install optional codec libraries"
             echo "  --optimize, -o      Aggressive Fedora optimization"
             echo "  --uninstall         Remove slim2diretta"
             echo "  --help, -h          Show this help"
@@ -995,8 +1077,8 @@ main() {
     while true; do
         show_main_menu
 
-        local max_option=7
-        [ "$OS" = "fedora" ] && max_option=8
+        local max_option=8
+        [ "$OS" = "fedora" ] && max_option=9
 
         read -p "Choose option [1-$max_option/u/q]: " choice
 
@@ -1027,6 +1109,9 @@ main() {
                 setup_webui
                 ;;
             8)
+                install_optional_codecs
+                ;;
+            9)
                 if [ "$OS" = "fedora" ]; then
                     optimize_fedora_aggressive
                 else
