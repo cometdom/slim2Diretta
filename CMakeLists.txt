@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.10)
-project(slim2diretta VERSION 1.1.0)
+project(slim2diretta VERSION 1.2.0)
 
 set(CMAKE_CXX_STANDARD 17)
 
@@ -376,6 +376,41 @@ if(ENABLE_AAC)
 endif()
 
 # ============================================
+# Optional: FFmpeg backend (libavcodec/libavutil)
+# ============================================
+option(ENABLE_FFMPEG "Enable FFmpeg decoder backend (alternative to native decoders)" ON)
+if(ENABLE_FFMPEG)
+    if(PKG_CONFIG_FOUND)
+        pkg_check_modules(AVCODEC libavcodec)
+        pkg_check_modules(AVUTIL libavutil)
+    endif()
+    if(NOT AVCODEC_FOUND)
+        find_library(AVCODEC_LIB NAMES avcodec)
+        find_path(AVCODEC_INC NAMES libavcodec/avcodec.h
+                  PATHS /usr/include /usr/include/x86_64-linux-gnu /usr/include/aarch64-linux-gnu)
+        if(AVCODEC_LIB AND AVCODEC_INC)
+            set(AVCODEC_LIBRARIES ${AVCODEC_LIB})
+            set(AVCODEC_INCLUDE_DIRS ${AVCODEC_INC})
+            set(AVCODEC_FOUND TRUE)
+        endif()
+    endif()
+    if(NOT AVUTIL_FOUND)
+        find_library(AVUTIL_LIB NAMES avutil)
+        if(AVUTIL_LIB)
+            set(AVUTIL_LIBRARIES ${AVUTIL_LIB})
+            set(AVUTIL_FOUND TRUE)
+        endif()
+    endif()
+    if(AVCODEC_FOUND AND AVUTIL_FOUND)
+        message(STATUS "FFmpeg backend: ENABLED (--decoder ffmpeg)")
+        add_definitions(-DENABLE_FFMPEG)
+    else()
+        message(STATUS "FFmpeg backend: DISABLED (libavcodec-dev/libavutil-dev not found)")
+        set(ENABLE_FFMPEG OFF)
+    endif()
+endif()
+
+# ============================================
 # Include Directories
 # ============================================
 
@@ -388,6 +423,9 @@ if(ENABLE_OGG)
 endif()
 if(ENABLE_AAC)
     list(APPEND EXTRA_INCLUDE_DIRS ${FDKAAC_INCLUDE_DIRS})
+endif()
+if(ENABLE_FFMPEG)
+    list(APPEND EXTRA_INCLUDE_DIRS ${AVCODEC_INCLUDE_DIRS})
 endif()
 
 include_directories(
@@ -410,6 +448,9 @@ if(ENABLE_OGG)
 endif()
 if(ENABLE_AAC)
     list(APPEND EXTRA_LINK_DIRS ${FDKAAC_LIBRARY_DIRS})
+endif()
+if(ENABLE_FFMPEG)
+    list(APPEND EXTRA_LINK_DIRS ${AVCODEC_LIBRARY_DIRS} ${AVUTIL_LIBRARY_DIRS})
 endif()
 
 link_directories(
@@ -444,6 +485,9 @@ endif()
 if(ENABLE_AAC)
     list(APPEND SLIM2DIRETTA_SOURCES src/AacDecoder.cpp)
 endif()
+if(ENABLE_FFMPEG)
+    list(APPEND SLIM2DIRETTA_SOURCES src/FfmpegDecoder.cpp)
+endif()
 
 # ============================================
 # Create Executable
@@ -472,6 +516,9 @@ if(ENABLE_OGG)
 endif()
 if(ENABLE_AAC)
     target_link_libraries(slim2diretta ${FDKAAC_LIBRARIES})
+endif()
+if(ENABLE_FFMPEG)
+    target_link_libraries(slim2diretta ${AVCODEC_LIBRARIES} ${AVUTIL_LIBRARIES})
 endif()
 
 # Link ACQUA if available
@@ -606,6 +653,13 @@ if(ENABLE_AAC)
     message(STATUS "  AAC:            ENABLED (fdk-aac)")
 else()
     message(STATUS "  AAC:            DISABLED")
+endif()
+message(STATUS "")
+message(STATUS "Backends:")
+if(ENABLE_FFMPEG)
+    message(STATUS "  FFmpeg:         ENABLED (--decoder ffmpeg)")
+else()
+    message(STATUS "  FFmpeg:         DISABLED")
 endif()
 message(STATUS "")
 message(STATUS "Dependencies:")
