@@ -348,7 +348,18 @@ size_t FfmpegDecoder::readDecoded(int32_t* out, size_t maxFrames) {
             }
         } else {
             // No parser (raw PCM) — send data directly as a packet
+            // Align to block_align to avoid sending partial frames
+            // (e.g. pcm_s24le stereo: block_align=6, 8192%6=2 → 2-byte
+            // remainder would be rejected by FFmpeg)
             size_t chunkSize = std::min(available, size_t(8192));
+            int blockAlign = m_codecCtx->block_align;
+            if (blockAlign > 0) {
+                chunkSize = (chunkSize / blockAlign) * blockAlign;
+            }
+            if (chunkSize == 0) {
+                break;  // Not enough data for a complete frame
+            }
+
             m_packet->data = const_cast<uint8_t*>(
                 m_inputBuffer.data() + m_inputPos);
             m_packet->size = static_cast<int>(chunkSize);
