@@ -297,6 +297,25 @@ size_t FfmpegDecoder::readDecoded(int32_t* out, size_t maxFrames) {
         size_t available = m_inputBuffer.size() - m_inputPos;
         if (available == 0) {
             if (m_eof) {
+                // Flush parser first — it may have buffered the last
+                // partial FLAC frame. Without this, the last few
+                // samples of the stream are lost → click at gapless
+                // track transitions.
+                if (m_parser && !m_parserFlushed) {
+                    uint8_t* outData = nullptr;
+                    int outSize = 0;
+                    av_parser_parse2(m_parser, m_codecCtx,
+                                     &outData, &outSize,
+                                     nullptr, 0,
+                                     AV_NOPTS_VALUE, AV_NOPTS_VALUE, 0);
+                    m_parserFlushed = true;
+                    if (outSize > 0) {
+                        m_packet->data = outData;
+                        m_packet->size = outSize;
+                        avcodec_send_packet(m_codecCtx, m_packet);
+                        continue;
+                    }
+                }
                 // Flush decoder
                 avcodec_send_packet(m_codecCtx, nullptr);
                 continue;
@@ -410,6 +429,7 @@ void FfmpegDecoder::flush() {
     m_error = false;
     m_finished = false;
     m_eof = false;
+    m_parserFlushed = false;
     m_decodedSamples = 0;
     m_rawPcmConfigured = false;
 }

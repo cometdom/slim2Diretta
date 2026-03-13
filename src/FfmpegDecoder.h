@@ -58,6 +58,7 @@ private:
     std::vector<uint8_t> m_inputBuffer;
     size_t m_inputPos = 0;
     bool m_eof = false;
+    bool m_parserFlushed = false;
 
     // Output buffer (decoded S32_LE interleaved)
     std::vector<int32_t> m_outputBuffer;

@@ -25,6 +25,8 @@ All notable changes to slim2diretta are documented in this file.
 
 - **Audio data loss in push loop**: Fixed `sendAudio` return value being ignored, causing `decodeCachePos` to advance past data that wasn't actually written to the ring buffer. Multi-chunk push (4×2048 frames) is now limited to high sample rates (>176kHz) where it's needed; normal rates use single 1024-frame push like v1.2.0.
 
+- **FFmpeg gapless click**: Fixed audible click at gapless track transitions when using FFmpeg decoder. The FFmpeg parser (`av_parser_parse2`) buffers partial codec frames internally; at stream EOF, this buffered data was never flushed, losing the last few samples of each track. Now flushes the parser with `(NULL, 0)` before flushing the decoder, recovering the final frame.
+
 ### Build Dependencies
 
 New optional dependency for FFmpeg backend:
