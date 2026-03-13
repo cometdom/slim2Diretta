@@ -19,6 +19,8 @@ All notable changes to slim2diretta are documented in this file.
 
 - **DSD64 DoP playback**: Fixed continuous ~485 Hz whistle tone when playing DSD64 via Roon (DoP). DoP frames are now passed through as 24-bit PCM to the Diretta Target, which handles DoP marker detection and DAC forwarding natively. Previously, `convertDopToNative()` destroyed the DoP markers causing frame misalignment. This matches the working behavior of squeeze2upnp→DirettaRendererUPnP. (Credit: hoorna, PR #4)
 
+- **DSD128 DoP underruns**: Fixed systematic buffer underruns when Roon downsamples DSD128 to DSD64 DoP (176.4 kHz carrier). The audio push loop now sends up to 8192 frames (4×2048) per iteration instead of a single 1024-frame chunk. At 176.4 kHz, the previous single-chunk push yielded only ~1.2× real-time throughput — insufficient to keep the ring buffer fed. (Reported by hoorna)
+
 ### Build Dependencies
 
 New optional dependency for FFmpeg backend:

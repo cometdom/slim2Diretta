@@ -134,9 +134,9 @@ SDK locations searched (in order):
 The audio thread (in `main.cpp`) handles HTTP reading, decoding, and ring buffer pushing in a single thread. Key constants and patterns:
 
 - **MAX_DECODE_FRAMES = 1024**: Decoder reads (adapts to libFLAC frame sizes)
-- **PUSH_CHUNK_FRAMES = 2048**: Push to DirettaSync (fewer calls, smoother pattern)
-- **Flow control**: Event-based `waitForSpace(500µs)` on condition variable when buffer >95% (not blind sleep)
-- **Adaptive throttle**: 2ms pause after push when buffer >50% (healthy), immediate push when ≤50% (catch-up)
+- **PUSH_CHUNK_FRAMES = 2048**: Push to DirettaSync in multi-chunk loop (up to 4×2048 = 8192 frames per iteration)
+- **Multi-chunk push**: At high sample rates (176.4kHz DoP, 192kHz+), a single 1024-frame push per loop yields insufficient throughput; the loop pushes as many chunks as possible while buffer has space
+- **Flow control**: 1ms sleep when buffer >95% full, loop back to HTTP read to keep TCP pipeline flowing
 - **Decode cache**: Up to 9.2M samples with compaction every 500k consumed samples
 - **Prebuffer**: 500ms normal, 1500ms for >192kHz
 
