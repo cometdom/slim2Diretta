@@ -21,6 +21,10 @@ All notable changes to slim2diretta are documented in this file.
 
 - **DSD128 DoP underruns**: Fixed systematic buffer underruns when Roon downsamples DSD128 to DSD64 DoP (176.4 kHz carrier). Three-pronged fix: (1) ring buffer doubled from 2s to 4s (8MB) for rates ≥176.4kHz, (2) adaptive rebuffer threshold — 40% for high-rate streams vs 20% for normal, providing 3.2MB/2.3s headroom after underrun instead of 0.8MB/0.6s, (3) prebuffer increased from 1500ms to 3000ms for high-rate streams. The high-rate threshold was also lowered from 192kHz to 176kHz to capture DSD64 DoP's 176.4kHz carrier. (Reported by hoorna)
 
+- **FFmpeg 24-bit PCM decoding**: Fixed continuous decode errors (`Invalid PCM packet, data has size 2 but at least a size of 6 was expected`) when playing 24-bit content via FFmpeg backend. Raw PCM packets were not aligned to `block_align` — for stereo 24-bit, 8192 % 6 = 2, causing a 2-byte remainder rejected by FFmpeg. 16-bit was unaffected (8192 % 4 = 0). (Reported by progman)
+
+- **Audio data loss in push loop**: Fixed `sendAudio` return value being ignored, causing `decodeCachePos` to advance past data that wasn't actually written to the ring buffer. Multi-chunk push (4×2048 frames) is now limited to high sample rates (>176kHz) where it's needed; normal rates use single 1024-frame push like v1.2.0.
+
 ### Build Dependencies
 
 New optional dependency for FFmpeg backend:

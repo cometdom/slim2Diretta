@@ -136,6 +136,7 @@ The audio thread (in `main.cpp`) handles HTTP reading, decoding, and ring buffer
 - **MAX_DECODE_FRAMES = 1024**: Decoder reads (adapts to libFLAC frame sizes)
 - **PUSH_CHUNK_FRAMES = 2048**: Push to DirettaSync in multi-chunk loop (up to 4×2048 = 8192 frames per iteration)
 - **Multi-chunk push**: At high sample rates (176.4kHz DoP, 192kHz+), a single 1024-frame push per loop yields insufficient throughput; the loop pushes as many chunks as possible while buffer has space
+- **sendAudio return value**: All push sites use the return value (input bytes consumed) to advance `decodeCachePos` — prevents data loss when ring buffer is near-full. Normal rates (≤176kHz) use single 1024-frame push per iteration; multi-chunk only for high rates
 - **Flow control**: 1ms sleep when buffer >95% full, loop back to HTTP read to keep TCP pipeline flowing
 - **Decode cache**: Up to 9.2M samples with compaction every 500k consumed samples
 - **Prebuffer**: 500ms normal, 3000ms for ≥176.4kHz
