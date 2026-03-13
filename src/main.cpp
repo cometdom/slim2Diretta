@@ -919,6 +919,24 @@ int main(int argc, char* argv[]) {
                     bool pcmFirstTrack = true;
                     AudioFormat prevAudioFmt{};
 
+                    // Shared decode cache: persists across gapless same-format
+                    // tracks so the ring buffer stays fed during transitions.
+                    // When DirettaSync buffer is full (flow control), we still read
+                    // HTTP and decode into this cache.
+                    // Max ~3s at 1536kHz stereo = 9216K samples
+                    constexpr size_t DECODE_CACHE_MAX_SAMPLES = 9216000;
+                    std::vector<int32_t> decodeCache;
+                    size_t decodeCachePos = 0;
+                    bool direttaOpened = false;
+                    AudioFormat audioFmt{};
+                    int detectedChannels = 2;
+
+                    // Helper: available frames in decode cache
+                    auto cacheFrames = [&]() -> size_t {
+                        return (decodeCache.size() - decodeCachePos) /
+                               std::max(detectedChannels, 1);
+                    };
+
                     while (true) {  // === PCM/FLAC CHAINING LOOP ===
 
                     // Create decoder for this format
@@ -960,33 +978,15 @@ int main(int argc, char* argv[]) {
                     bool formatLogged = false;
                     uint64_t lastElapsedLog = 0;
 
-                    // Decode cache: decouples HTTP reading from DirettaSync pushing.
-                    // When DirettaSync buffer is full (flow control), we still read
-                    // HTTP and decode into this cache. This prevents TCP starvation
-                    // that caused underruns with bursty Qobuz streams.
-                    // Max ~3s at 1536kHz stereo = 9216K samples
-                    constexpr size_t DECODE_CACHE_MAX_SAMPLES = 9216000;
-                    std::vector<int32_t> decodeCache;
-                    size_t decodeCachePos = 0;  // Read position (samples consumed)
-
                     // Adaptive prebuffer: high sample rates (>192kHz) need more margin
                     // because LMS streams at ~1x real-time at these rates
                     constexpr unsigned int PREBUFFER_MS_NORMAL = 500;
                     constexpr unsigned int PREBUFFER_MS_HIGHRATE = 3000;
                     unsigned int prebufferMs = PREBUFFER_MS_NORMAL;
                     uint64_t pushedFrames = 0;  // Frames actually sent to DirettaSync
-                    bool direttaOpened = false;
-                    AudioFormat audioFmt{};
-                    int detectedChannels = 2;
 
                     // DoP (DSD over PCM) detection — Roon sends DSD as DoP
                     bool dopDetected = false;
-
-                    // Helper: available frames in decode cache
-                    auto cacheFrames = [&]() -> size_t {
-                        return (decodeCache.size() - decodeCachePos) /
-                               std::max(detectedChannels, 1);
-                    };
 
                     bool httpEof = false;
                     bool stmdSent = false;  // Gapless: send STMd once on EOF
@@ -1054,6 +1054,52 @@ int main(int argc, char* argv[]) {
                             auto fmt = decoder->getFormat();
                             LOG_INFO("[Audio] Decoding: " << fmt.sampleRate << " Hz, "
                                      << fmt.bitDepth << "-bit, " << fmt.channels << " ch");
+
+                            // Gapless continuation: DirettaSync already open
+                            // from previous track via shared cache
+                            if (direttaOpened && !pcmFirstTrack) {
+                                bool sameFormat =
+                                    (fmt.sampleRate == audioFmt.sampleRate &&
+                                     fmt.channels == audioFmt.channels);
+                                if (sameFormat) {
+                                    LOG_INFO("[Gapless] PCM same format, "
+                                        "continuing ring buffer (shared cache: "
+                                        << cacheFrames() << " frames)");
+                                    direttaPtr->setS24PackModeHint(
+                                        DirettaRingBuffer::S24PackMode::MsbAligned);
+                                    slimproto->sendStat(StatEvent::STMl);
+                                } else {
+                                    // Format change — drain old cache (old
+                                    // format), then Phase 3 will reopen
+                                    LOG_INFO("[Gapless] Format change ("
+                                        << audioFmt.sampleRate << "/"
+                                        << audioFmt.channels << " -> "
+                                        << fmt.sampleRate << "/"
+                                        << fmt.channels << "), draining "
+                                        << cacheFrames() << " old frames");
+                                    while (cacheFrames() > 0 &&
+                                           audioTestRunning.load(
+                                               std::memory_order_acquire)) {
+                                        if (direttaPtr->getBufferLevel() > 0.95f) {
+                                            std::this_thread::sleep_for(
+                                                std::chrono::milliseconds(1));
+                                            continue;
+                                        }
+                                        size_t push = std::min(cacheFrames(),
+                                                               MAX_DECODE_FRAMES);
+                                        size_t written = direttaPtr->sendAudio(
+                                            reinterpret_cast<const uint8_t*>(
+                                                decodeCache.data() + decodeCachePos),
+                                            push);
+                                        size_t fw = written /
+                                            (sizeof(int32_t) * detectedChannels);
+                                        if (fw == 0) continue;
+                                        decodeCachePos += fw * detectedChannels;
+                                    }
+                                    direttaOpened = false;
+                                }
+                            }
+
                             detectedChannels = fmt.channels;
                             audioFmt.sampleRate = fmt.sampleRate;
                             audioFmt.bitDepth = 32;
@@ -1277,61 +1323,71 @@ int main(int argc, char* argv[]) {
                             decodeBuf + frames * detectedChannels);
                     }
 
-                    // Push remaining cache to DirettaSync
-                    while (direttaOpened && cacheFrames() > 0 &&
-                           audioTestRunning.load(std::memory_order_acquire)) {
-                        while (audioTestRunning.load(std::memory_order_acquire)) {
-                            if (direttaPtr->isPaused()) {
-                                std::this_thread::sleep_for(
-                                    std::chrono::milliseconds(100));
-                                continue;
-                            }
-                            if (direttaPtr->getBufferLevel() > 0.95f) {
-                                std::unique_lock<std::mutex> lock(
-                                    direttaPtr->getFlowMutex());
-                                direttaPtr->waitForSpace(lock,
-                                    std::chrono::milliseconds(5));
-                                continue;
-                            }
-                            break;
-                        }
-                        size_t push = std::min(cacheFrames(), MAX_DECODE_FRAMES);
-                        size_t written = direttaPtr->sendAudio(
-                            reinterpret_cast<const uint8_t*>(
-                                decodeCache.data() + decodeCachePos),
-                            push);
-                        size_t framesWritten = written /
-                            (sizeof(int32_t) * detectedChannels);
-                        if (framesWritten == 0) continue;
-                        decodeCachePos += framesWritten * detectedChannels;
-                        pushedFrames += framesWritten;
+                    // === GAPLESS: check if next track is already queued ===
+                    // If gapless is pending, skip cache-to-ring drain — the
+                    // shared cache keeps feeding the ring buffer seamlessly
+                    // during the decoder switch for the next track.
+                    bool gaplessPending = hasPendingTrack.load(std::memory_order_acquire);
 
-                        // Update elapsed during drain
-                        if (decoder->isFormatReady()) {
-                            auto fmt = decoder->getFormat();
-                            uint32_t elapsedRate = fmt.sampleRate;
-                            if (elapsedRate > 0) {
-                                uint64_t totalMs = pushedFrames * 1000 / elapsedRate;
-                                uint32_t elapsedSec = static_cast<uint32_t>(totalMs / 1000);
-                                uint32_t elapsedMs = static_cast<uint32_t>(totalMs);
-                                slimproto->updateElapsed(elapsedSec, elapsedMs);
+                    if (!gaplessPending) {
+                        // No gapless yet — drain cache to ring buffer
+                        while (direttaOpened && cacheFrames() > 0 &&
+                               audioTestRunning.load(std::memory_order_acquire)) {
+                            while (audioTestRunning.load(std::memory_order_acquire)) {
+                                if (direttaPtr->isPaused()) {
+                                    std::this_thread::sleep_for(
+                                        std::chrono::milliseconds(100));
+                                    continue;
+                                }
+                                if (direttaPtr->getBufferLevel() > 0.95f) {
+                                    std::unique_lock<std::mutex> lock(
+                                        direttaPtr->getFlowMutex());
+                                    direttaPtr->waitForSpace(lock,
+                                        std::chrono::milliseconds(5));
+                                    continue;
+                                }
+                                break;
+                            }
+                            size_t push = std::min(cacheFrames(), MAX_DECODE_FRAMES);
+                            size_t written = direttaPtr->sendAudio(
+                                reinterpret_cast<const uint8_t*>(
+                                    decodeCache.data() + decodeCachePos),
+                                push);
+                            size_t framesWritten = written /
+                                (sizeof(int32_t) * detectedChannels);
+                            if (framesWritten == 0) continue;
+                            decodeCachePos += framesWritten * detectedChannels;
+                            pushedFrames += framesWritten;
+
+                            // Update elapsed during drain
+                            if (decoder->isFormatReady()) {
+                                auto fmt = decoder->getFormat();
+                                uint32_t elapsedRate = fmt.sampleRate;
+                                if (elapsedRate > 0) {
+                                    uint64_t totalMs = pushedFrames * 1000 / elapsedRate;
+                                    uint32_t elapsedSec = static_cast<uint32_t>(totalMs / 1000);
+                                    uint32_t elapsedMs = static_cast<uint32_t>(totalMs);
+                                    slimproto->updateElapsed(elapsedSec, elapsedMs);
+                                }
                             }
                         }
-                    }
 
-                    // === GAPLESS: wait for LMS to send next strm-s ===
-                    // Ring buffer still has audio being consumed by DAC
-                    if (!hasPendingTrack.load(std::memory_order_acquire) &&
-                        audioTestRunning.load(std::memory_order_acquire)) {
-                        LOG_DEBUG("[Gapless] PCM: waiting for next track...");
-                        auto waitStart = std::chrono::steady_clock::now();
-                        constexpr int GAPLESS_WAIT_MS = 2000;
-                        while (!hasPendingTrack.load(std::memory_order_acquire) &&
-                               audioTestRunning.load(std::memory_order_acquire) &&
-                               std::chrono::duration_cast<std::chrono::milliseconds>(
-                                   std::chrono::steady_clock::now() - waitStart).count() < GAPLESS_WAIT_MS) {
-                            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                        // Wait for LMS to send next strm-s
+                        if (!hasPendingTrack.load(std::memory_order_acquire) &&
+                            audioTestRunning.load(std::memory_order_acquire)) {
+                            LOG_DEBUG("[Gapless] PCM: waiting for next track...");
+                            auto waitStart = std::chrono::steady_clock::now();
+                            constexpr int GAPLESS_WAIT_MS = 2000;
+                            while (!hasPendingTrack.load(std::memory_order_acquire) &&
+                                   audioTestRunning.load(std::memory_order_acquire) &&
+                                   std::chrono::duration_cast<std::chrono::milliseconds>(
+                                       std::chrono::steady_clock::now() - waitStart).count() < GAPLESS_WAIT_MS) {
+                                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                            }
                         }
+                    } else {
+                        LOG_INFO("[Gapless] Next track pending, keeping "
+                                 << cacheFrames() << " frames in shared cache");
                     }
 
                     // === GAPLESS CHECK: chain to next PCM/FLAC track? ===
@@ -1354,6 +1410,12 @@ int main(int argc, char* argv[]) {
                             curPcmEndian = next->pcmEndian;
                             prevAudioFmt = audioFmt;
                             pcmFirstTrack = false;
+                            // Compact shared cache (remove consumed portion)
+                            if (decodeCachePos > 0) {
+                                decodeCache.erase(decodeCache.begin(),
+                                    decodeCache.begin() + decodeCachePos);
+                                decodeCachePos = 0;
+                            }
                             continue;  // Loop back for next PCM/FLAC track
                         }
                         // Cross-format (PCM→DSD): can't chain
