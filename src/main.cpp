@@ -1159,13 +1159,15 @@ int main(int argc, char* argv[]) {
                                        audioTestRunning.load(std::memory_order_relaxed)) {
                                     if (direttaPtr->getBufferLevel() > 0.95f) break;
                                     size_t chunk = std::min(remaining, MAX_DECODE_FRAMES);
-                                    // DoP passthrough: always send as PCM
-                                    direttaPtr->sendAudio(
+                                    size_t written = direttaPtr->sendAudio(
                                         reinterpret_cast<const uint8_t*>(ptr),
                                         chunk);
-                                    ptr += chunk * detectedChannels;
-                                    remaining -= chunk;
-                                    actualPushed += chunk;
+                                    size_t framesWritten = written /
+                                        (sizeof(int32_t) * detectedChannels);
+                                    if (framesWritten == 0) break;
+                                    ptr += framesWritten * detectedChannels;
+                                    remaining -= framesWritten;
+                                    actualPushed += framesWritten;
                                 }
                                 decodeCachePos += actualPushed * detectedChannels;
                                 pushedFrames += actualPushed;
@@ -1176,30 +1178,39 @@ int main(int argc, char* argv[]) {
                         }
 
                         // ========== PHASE 4: Push from cache to DirettaSync ==========
-                        // Push multiple chunks per iteration to keep up with
-                        // high sample rates (176.4kHz DoP, 192kHz+).  A single
-                        // 1024-frame push per loop iteration only yields ~1.2x
-                        // real-time at 176.4kHz, which causes underruns.
+                        // High sample rates (176.4kHz DoP, 192kHz+) need multi-chunk
+                        // push per iteration to avoid underruns.  Normal rates use
+                        // a single push like v1.2.0.
                         if (direttaOpened && cacheFrames() > 0) {
                             if (direttaPtr->isPaused()) {
                                 std::this_thread::sleep_for(
                                     std::chrono::milliseconds(100));
                             } else if (direttaPtr->getBufferLevel() <= 0.95f) {
+                                bool highRate = audioFmt.sampleRate >
+                                    DirettaBuffer::HIGHRATE_THRESHOLD;
                                 constexpr size_t PUSH_CHUNK_FRAMES = 2048;
-                                constexpr size_t MAX_PUSH_PER_ITER = PUSH_CHUNK_FRAMES * 4;
+                                size_t maxPerIter = highRate
+                                    ? PUSH_CHUNK_FRAMES * 4
+                                    : MAX_DECODE_FRAMES;
+                                size_t chunkSize = highRate
+                                    ? PUSH_CHUNK_FRAMES
+                                    : MAX_DECODE_FRAMES;
                                 size_t pushed = 0;
                                 while (cacheFrames() > 0 &&
-                                       pushed < MAX_PUSH_PER_ITER &&
+                                       pushed < maxPerIter &&
                                        direttaPtr->getBufferLevel() <= 0.95f) {
                                     size_t push = std::min(cacheFrames(),
-                                                           PUSH_CHUNK_FRAMES);
-                                    direttaPtr->sendAudio(
+                                                           chunkSize);
+                                    size_t written = direttaPtr->sendAudio(
                                         reinterpret_cast<const uint8_t*>(
                                             decodeCache.data() + decodeCachePos),
                                         push);
-                                    decodeCachePos += push * detectedChannels;
-                                    pushedFrames += push;
-                                    pushed += push;
+                                    size_t framesWritten = written /
+                                        (sizeof(int32_t) * detectedChannels);
+                                    if (framesWritten == 0) break;
+                                    decodeCachePos += framesWritten * detectedChannels;
+                                    pushedFrames += framesWritten;
+                                    pushed += framesWritten;
                                 }
                             } else {
                                 // Buffer full - sleep briefly, then loop back
@@ -1285,13 +1296,15 @@ int main(int argc, char* argv[]) {
                             break;
                         }
                         size_t push = std::min(cacheFrames(), MAX_DECODE_FRAMES);
-                        // DoP passthrough: always send as PCM
-                        direttaPtr->sendAudio(
+                        size_t written = direttaPtr->sendAudio(
                             reinterpret_cast<const uint8_t*>(
                                 decodeCache.data() + decodeCachePos),
                             push);
-                        decodeCachePos += push * detectedChannels;
-                        pushedFrames += push;
+                        size_t framesWritten = written /
+                            (sizeof(int32_t) * detectedChannels);
+                        if (framesWritten == 0) continue;
+                        decodeCachePos += framesWritten * detectedChannels;
+                        pushedFrames += framesWritten;
 
                         // Update elapsed during drain
                         if (decoder->isFormatReady()) {
