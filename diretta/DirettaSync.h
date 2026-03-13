@@ -189,7 +189,7 @@ namespace DirettaRetry {
 namespace DirettaBuffer {
     constexpr float DSD_BUFFER_SECONDS = 0.8f;
     constexpr float PCM_BUFFER_SECONDS = 0.5f;  // Balance: low latency + resilience
-    constexpr float PCM_HIGHRATE_BUFFER_SECONDS = 2.0f;  // >=176.4kHz: LMS/Roon stream at ~1x real-time
+    constexpr float PCM_HIGHRATE_BUFFER_SECONDS = 4.0f;  // >=176.4kHz: LMS/Roon stream at ~1x real-time
     constexpr uint32_t HIGHRATE_THRESHOLD = 176000;       // Sample rate above which we use larger buffers
                                                            // 176000 captures 176.4kHz (DSD64 DoP) and 192kHz
 
@@ -208,6 +208,7 @@ namespace DirettaBuffer {
     constexpr size_t PREFILL_MS_HIGHRATE_UNCOMPRESSED = 1000;
 
     constexpr float REBUFFER_THRESHOLD_PCT = 0.20f;      // Resume playback after 20% buffer refill
+    constexpr float REBUFFER_THRESHOLD_PCT_HIGHRATE = 0.40f;  // High-rate streams: 40% for longer headroom
 
     constexpr unsigned int DAC_STABILIZATION_MS = 100;
     constexpr unsigned int ONLINE_WAIT_MS = 2000;

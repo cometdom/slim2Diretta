@@ -972,7 +972,7 @@ int main(int argc, char* argv[]) {
                     // Adaptive prebuffer: high sample rates (>192kHz) need more margin
                     // because LMS streams at ~1x real-time at these rates
                     constexpr unsigned int PREBUFFER_MS_NORMAL = 500;
-                    constexpr unsigned int PREBUFFER_MS_HIGHRATE = 1500;
+                    constexpr unsigned int PREBUFFER_MS_HIGHRATE = 3000;
                     unsigned int prebufferMs = PREBUFFER_MS_NORMAL;
                     uint64_t pushedFrames = 0;  // Frames actually sent to DirettaSync
                     bool direttaOpened = false;

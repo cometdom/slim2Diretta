@@ -1708,7 +1708,10 @@ bool DirettaSync::getNewStream(diretta_stream& baseStream) {
     // Prevents stuttering ("CD skip" effect) when small data bursts trickle in
     // during a network stall — accumulates data for a clean resumption
     if (m_rebuffering.load(std::memory_order_acquire)) {
-        size_t threshold = static_cast<size_t>(currentRingSize * DirettaBuffer::REBUFFER_THRESHOLD_PCT);
+        float pct = (m_cachedConsumerSampleRate > static_cast<int>(DirettaBuffer::HIGHRATE_THRESHOLD))
+                  ? DirettaBuffer::REBUFFER_THRESHOLD_PCT_HIGHRATE
+                  : DirettaBuffer::REBUFFER_THRESHOLD_PCT;
+        size_t threshold = static_cast<size_t>(currentRingSize * pct);
         if (avail >= threshold) {
             m_rebuffering.store(false, std::memory_order_release);
             LOG_WARN("[DirettaSync] Rebuffering complete — resuming playback (avail="
