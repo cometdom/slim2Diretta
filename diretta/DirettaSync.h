@@ -189,8 +189,9 @@ namespace DirettaRetry {
 namespace DirettaBuffer {
     constexpr float DSD_BUFFER_SECONDS = 0.8f;
     constexpr float PCM_BUFFER_SECONDS = 0.5f;  // Balance: low latency + resilience
-    constexpr float PCM_HIGHRATE_BUFFER_SECONDS = 2.0f;  // >192kHz: LMS streams at ~1x real-time
-    constexpr uint32_t HIGHRATE_THRESHOLD = 192000;       // Sample rate above which we use larger buffers
+    constexpr float PCM_HIGHRATE_BUFFER_SECONDS = 2.0f;  // >=176.4kHz: LMS/Roon stream at ~1x real-time
+    constexpr uint32_t HIGHRATE_THRESHOLD = 176000;       // Sample rate above which we use larger buffers
+                                                           // 176000 captures 176.4kHz (DSD64 DoP) and 192kHz
 
     constexpr size_t DSD_PREFILL_MS = 200;
     constexpr size_t PCM_PREFILL_MS = 50;       // Restored from 30 for stability
@@ -202,7 +203,7 @@ namespace DirettaBuffer {
     constexpr size_t PREFILL_MS_COMPRESSED = 200;    // FLAC, ALAC
     constexpr size_t PREFILL_MS_UNCOMPRESSED = 100;  // WAV, AIFF
     constexpr size_t PREFILL_MS_DSD = 150;           // DSD (fixed)
-    // High sample rates (>192kHz): LMS delivers at ~1x real-time, need more margin
+    // High sample rates (>=176.4kHz): LMS/Roon deliver at ~1x real-time, need more margin
     constexpr size_t PREFILL_MS_HIGHRATE_COMPRESSED = 1500;
     constexpr size_t PREFILL_MS_HIGHRATE_UNCOMPRESSED = 1000;
 
