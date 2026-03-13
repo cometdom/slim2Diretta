@@ -1176,20 +1176,31 @@ int main(int argc, char* argv[]) {
                         }
 
                         // ========== PHASE 4: Push from cache to DirettaSync ==========
+                        // Push multiple chunks per iteration to keep up with
+                        // high sample rates (176.4kHz DoP, 192kHz+).  A single
+                        // 1024-frame push per loop iteration only yields ~1.2x
+                        // real-time at 176.4kHz, which causes underruns.
                         if (direttaOpened && cacheFrames() > 0) {
                             if (direttaPtr->isPaused()) {
                                 std::this_thread::sleep_for(
                                     std::chrono::milliseconds(100));
                             } else if (direttaPtr->getBufferLevel() <= 0.95f) {
-                                // Buffer has space - push one chunk
-                                size_t push = std::min(cacheFrames(), MAX_DECODE_FRAMES);
-                                // DoP passthrough: always send as PCM
-                                direttaPtr->sendAudio(
-                                    reinterpret_cast<const uint8_t*>(
-                                        decodeCache.data() + decodeCachePos),
-                                    push);
-                                decodeCachePos += push * detectedChannels;
-                                pushedFrames += push;
+                                constexpr size_t PUSH_CHUNK_FRAMES = 2048;
+                                constexpr size_t MAX_PUSH_PER_ITER = PUSH_CHUNK_FRAMES * 4;
+                                size_t pushed = 0;
+                                while (cacheFrames() > 0 &&
+                                       pushed < MAX_PUSH_PER_ITER &&
+                                       direttaPtr->getBufferLevel() <= 0.95f) {
+                                    size_t push = std::min(cacheFrames(),
+                                                           PUSH_CHUNK_FRAMES);
+                                    direttaPtr->sendAudio(
+                                        reinterpret_cast<const uint8_t*>(
+                                            decodeCache.data() + decodeCachePos),
+                                        push);
+                                    decodeCachePos += push * detectedChannels;
+                                    pushedFrames += push;
+                                    pushed += push;
+                                }
                             } else {
                                 // Buffer full - sleep briefly, then loop back
                                 // to read more HTTP (keeps TCP pipeline flowing)
