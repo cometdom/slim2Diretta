@@ -19,7 +19,7 @@ All notable changes to slim2diretta are documented in this file.
 
 - **DSD64 DoP playback**: Fixed continuous ~485 Hz whistle tone when playing DSD64 via Roon (DoP). DoP frames are now passed through as 24-bit PCM to the Diretta Target, which handles DoP marker detection and DAC forwarding natively. Previously, `convertDopToNative()` destroyed the DoP markers causing frame misalignment. This matches the working behavior of squeeze2upnp→DirettaRendererUPnP. (Credit: hoorna, PR #4)
 
-- **DSD128 DoP underruns**: Fixed systematic buffer underruns when Roon downsamples DSD128 to DSD64 DoP (176.4 kHz carrier). The audio push loop now sends up to 8192 frames (4×2048) per iteration instead of a single 1024-frame chunk. At 176.4 kHz, the previous single-chunk push yielded only ~1.2× real-time throughput — insufficient to keep the ring buffer fed. (Reported by hoorna)
+- **DSD128 DoP underruns**: Fixed systematic buffer underruns when Roon downsamples DSD128 to DSD64 DoP (176.4 kHz carrier). Three-pronged fix: (1) ring buffer doubled from 2s to 4s (8MB) for rates ≥176.4kHz, (2) adaptive rebuffer threshold — 40% for high-rate streams vs 20% for normal, providing 3.2MB/2.3s headroom after underrun instead of 0.8MB/0.6s, (3) prebuffer increased from 1500ms to 3000ms for high-rate streams. The high-rate threshold was also lowered from 192kHz to 176kHz to capture DSD64 DoP's 176.4kHz carrier. (Reported by hoorna)
 
 ### Build Dependencies
 
@@ -183,7 +183,7 @@ Initial test release for validation by beta testers.
   - PCM/WAV/AIFF container parsing with raw PCM fallback (Roon)
   - Native DSD: DSF (LSB-first) and DFF/DSDIFF (MSB-first) container parsing
   - DSD rates: DSD64, DSD128, DSD256, DSD512
-  - DoP (DSD over PCM): automatic detection and conversion to native DSD (Roon compatibility)
+  - DoP (DSD over PCM): automatic detection and passthrough as 24-bit PCM to Diretta Target
   - WAVE_FORMAT_EXTENSIBLE support for WAV headers
 
 - **Diretta output** (shared DirettaSync v2.0):

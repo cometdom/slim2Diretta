@@ -138,7 +138,9 @@ The audio thread (in `main.cpp`) handles HTTP reading, decoding, and ring buffer
 - **Multi-chunk push**: At high sample rates (176.4kHz DoP, 192kHz+), a single 1024-frame push per loop yields insufficient throughput; the loop pushes as many chunks as possible while buffer has space
 - **Flow control**: 1ms sleep when buffer >95% full, loop back to HTTP read to keep TCP pipeline flowing
 - **Decode cache**: Up to 9.2M samples with compaction every 500k consumed samples
-- **Prebuffer**: 500ms normal, 1500ms for >192kHz
+- **Prebuffer**: 500ms normal, 3000ms for ≥176.4kHz
+- **Ring buffer sizing**: 0.5s normal, 4.0s for ≥176.4kHz (PCM_HIGHRATE_BUFFER_SECONDS). HIGHRATE_THRESHOLD = 176000
+- **Adaptive rebuffering**: After underrun, high-rate streams use 40% refill threshold (vs 20% normal) — provides ~2.3s headroom for bursty sources like Roon DSD128→DSD64 downsampling
 
 This pattern was aligned with DirettaRendererUPnP's audio engine for consistent delivery characteristics across both projects.
 
