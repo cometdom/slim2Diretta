@@ -744,7 +744,9 @@ bool DirettaSync::open(const AudioFormat& format) {
 
         DIRETTA_LOG("DSD: bitRate=" << dsdBitRate << " byteRate=" << byteRate);
 
-        configureSinkDSD(dsdBitRate, format.channels, format);
+        if (!configureSinkDSD(dsdBitRate, format.channels, format)) {
+            return false;
+        }
         configureRingDSD(byteRate, format.channels);
     } else {
         effectiveSampleRate = format.sampleRate;
@@ -1051,7 +1053,7 @@ void DirettaSync::configureSinkPCM(int rate, int channels, int inputBits, int& a
     throw std::runtime_error("No supported PCM format found");
 }
 
-void DirettaSync::configureSinkDSD(uint32_t dsdBitRate, int channels, const AudioFormat& format) {
+bool DirettaSync::configureSinkDSD(uint32_t dsdBitRate, int channels, const AudioFormat& format) {
     std::lock_guard<std::mutex> lock(m_configMutex);
 
     DIRETTA_LOG("DSD: bitRate=" << dsdBitRate << " ch=" << channels);
@@ -1085,7 +1087,7 @@ void DirettaSync::configureSinkDSD(uint32_t dsdBitRate, int channels, const Audi
         DIRETTA_LOG("Sink DSD: LSB | BIG"
                     << (m_needDsdBitReversal.load(std::memory_order_acquire) ? " (bit reversal)" : "")
                     << " mode=" << static_cast<int>(m_dsdConversionMode.load(std::memory_order_relaxed)));
-        return;
+        return true;
     }
 
     // Try MSB | BIG
@@ -1104,7 +1106,7 @@ void DirettaSync::configureSinkDSD(uint32_t dsdBitRate, int channels, const Audi
         DIRETTA_LOG("Sink DSD: MSB | BIG"
                     << (m_needDsdBitReversal.load(std::memory_order_acquire) ? " (bit reversal)" : "")
                     << " mode=" << static_cast<int>(m_dsdConversionMode.load(std::memory_order_relaxed)));
-        return;
+        return true;
     }
 
     // Try LSB | LITTLE
@@ -1123,7 +1125,7 @@ void DirettaSync::configureSinkDSD(uint32_t dsdBitRate, int channels, const Audi
         DIRETTA_LOG("Sink DSD: LSB | LITTLE"
                     << (m_needDsdBitReversal.load(std::memory_order_acquire) ? " (bit reversal)" : "")
                     << " (byte swap) mode=" << static_cast<int>(m_dsdConversionMode.load(std::memory_order_relaxed)));
-        return;
+        return true;
     }
 
     // Try MSB | LITTLE
@@ -1142,7 +1144,7 @@ void DirettaSync::configureSinkDSD(uint32_t dsdBitRate, int channels, const Audi
         DIRETTA_LOG("Sink DSD: MSB | LITTLE"
                     << (m_needDsdBitReversal.load(std::memory_order_acquire) ? " (bit reversal)" : "")
                     << " (byte swap) mode=" << static_cast<int>(m_dsdConversionMode.load(std::memory_order_relaxed)));
-        return;
+        return true;
     }
 
     // Last resort - assume LSB | BIG target
@@ -1167,10 +1169,12 @@ void DirettaSync::configureSinkDSD(uint32_t dsdBitRate, int channels, const Audi
             m_dsdConversionMode.store(DirettaRingBuffer::DSDConversionMode::Passthrough, std::memory_order_release);
         }
         DIRETTA_LOG("DSD conversion mode: " << static_cast<int>(m_dsdConversionMode.load(std::memory_order_relaxed)));
-        return;
+        return true;
     }
 
-    throw std::runtime_error("No supported DSD format found");
+    std::cerr << "[DirettaSync] ERROR: DAC does not support native DSD — "
+              << "configure LMS to send DoP instead of native DSD" << std::endl;
+    return false;
 }
 
 //=============================================================================
