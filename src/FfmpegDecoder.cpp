@@ -93,6 +93,14 @@ bool FfmpegDecoder::initDecoder() {
 
     // Create parser (may be null for some codecs like raw PCM — that's OK)
     m_parser = av_parser_init(codec->id);
+    if (m_formatCode == 'p' && m_parser) {
+        // Raw PCM must not use a parser — we handle block_align
+        // alignment ourselves.  Some FFmpeg versions provide a PCM
+        // parser that splits data without respecting block_align,
+        // producing 2-byte or 4-byte packets rejected by the decoder.
+        av_parser_close(m_parser);
+        m_parser = nullptr;
+    }
     if (!m_parser && m_formatCode != 'p') {
         LOG_WARN("[FFmpeg] No parser for " << codec->name
                  << " — will send raw packets");
