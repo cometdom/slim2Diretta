@@ -498,7 +498,7 @@ private:
     void shutdownWorker();
 
     void configureSinkPCM(int rate, int channels, int inputBits, int& acceptedBits);
-    void configureSinkDSD(uint32_t dsdBitRate, int channels, const AudioFormat& format);
+    bool configureSinkDSD(uint32_t dsdBitRate, int channels, const AudioFormat& format);
     void configureRingPCM(int rate, int channels, int direttaBps, int inputBps, bool isCompressed);
     void configureRingDSD(uint32_t byteRate, int channels);
     size_t calculateAlignedPrefill(size_t bytesPerSecond, size_t bytesPerBuffer,
