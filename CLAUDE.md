@@ -145,6 +145,20 @@ The audio thread (in `main.cpp`) handles HTTP reading, decoding, and ring buffer
 
 This pattern was aligned with DirettaRendererUPnP's audio engine for consistent delivery characteristics across both projects.
 
+## FFmpeg Raw PCM Notes
+
+When FFmpeg is used without a demuxer (raw PCM fed directly to codec), two pitfalls:
+- **`block_align` is 0**: Must be set explicitly to `channels × bytes_per_sample` before `avcodec_open2()`, otherwise alignment guards are silently skipped
+- **PCM parser splits incorrectly**: Some FFmpeg versions provide a parser for `pcm_s24le` that splits data without respecting `block_align` — force `m_parser = nullptr` for raw PCM (format code `'p'`)
+- **Parser flush at EOF**: `av_parser_parse2()` buffers partial codec frames; must flush with `(NULL, 0)` before flushing the decoder to recover the last audio frame (critical for gapless transitions)
+
+## Gapless Playback Strategy
+
+- **Shared decode cache**: `decodeCache`, `decodeCachePos`, `direttaOpened`, `audioFmt` persist across gapless same-format tracks (outside the chaining `while(true)` loop)
+- **Same-format continuation**: If next track has same sample rate and channels, skip Diretta close/reopen — just keep pushing to the ring buffer
+- **Format change**: Drain remaining cache, close Diretta, reopen with new format
+- **STMd timing**: Sent at HTTP EOF, but decode cache may still have seconds of audio buffered — LMS handles track counter advancement
+
 ## Web UI
 
 - Python 3 HTTP server on port 8081 (no external dependencies)
