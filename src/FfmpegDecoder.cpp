@@ -120,6 +120,14 @@ bool FfmpegDecoder::initDecoder() {
         av_channel_layout_default(&layout, static_cast<int>(m_rawChannels));
         av_channel_layout_copy(&m_codecCtx->ch_layout, &layout);
         av_channel_layout_uninit(&layout);
+        // block_align = channels × bytes_per_sample — required so the
+        // decode loop can align chunks and avoid partial-frame packets.
+        // Without a demuxer, FFmpeg does not compute this automatically.
+        int bytesPerSample = static_cast<int>(m_rawBitDepth) / 8;
+        m_codecCtx->block_align = static_cast<int>(m_rawChannels) * bytesPerSample;
+        LOG_DEBUG("[FFmpeg] Raw PCM block_align set to "
+                  << m_codecCtx->block_align << " (" << m_rawChannels
+                  << " ch × " << bytesPerSample << " bytes)");
     }
 
     // Request S32 output for FLAC (gives MSB-aligned 24-bit in S32 container)
