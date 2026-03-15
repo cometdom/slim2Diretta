@@ -73,7 +73,7 @@ private:
 
     // Minimum bytes before attempting avformat_open_input
     // (needs enough for header probing: FLAC streaminfo, MP3 sync, etc.)
-    static constexpr size_t MIN_PROBE_BYTES = 131072;  // 128KB
+    static constexpr size_t MIN_PROBE_BYTES = 524288;  // 512KB
 
     // ── Mode A: avformat/AVIO contexts ──
     AVFormatContext* m_fmtCtx = nullptr;
