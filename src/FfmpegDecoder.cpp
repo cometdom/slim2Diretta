@@ -159,6 +159,10 @@ bool FfmpegDecoder::initAvformat() {
         return false;
     }
     m_fmtCtx->pb = m_avioCtx;
+    // Minimize probing — we provide the format hint and don't call
+    // avformat_find_stream_info, so only the container header is needed.
+    m_fmtCtx->probesize = 32768;
+    m_fmtCtx->max_analyze_duration = 0;
 
     // Hint the input format when we know it from Slimproto
     const AVInputFormat* inputFmt = nullptr;
@@ -183,14 +187,12 @@ bool FfmpegDecoder::initAvformat() {
         return false;
     }
 
-    // Find stream info (may consume some frames — they're cached internally)
-    ret = avformat_find_stream_info(m_fmtCtx, nullptr);
-    if (ret < 0) {
-        char errbuf[128];
-        av_strerror(ret, errbuf, sizeof(errbuf));
-        LOG_WARN("[FFmpeg] avformat_find_stream_info: " << errbuf
-                 << " (continuing anyway)");
-    }
+    // Skip avformat_find_stream_info() — it consumes data via the AVIO
+    // callback and can corrupt internal state when the buffer runs dry
+    // (AVIO returns AVERROR_EOF mid-probe, truncating FLAC frames).
+    // Not needed: FLAC STREAMINFO is read by avformat_open_input(),
+    // and we provide the format hint from the Slimproto format code.
+    // Stream parameters are detected from the first decoded frame.
 
     // Find audio stream
     m_audioStreamIdx = av_find_best_stream(m_fmtCtx, AVMEDIA_TYPE_AUDIO,
