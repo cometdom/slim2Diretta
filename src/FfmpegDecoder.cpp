@@ -569,20 +569,21 @@ size_t FfmpegDecoder::readDecoded(int32_t* out, size_t maxFrames) {
                 continue;
             }
 
-            if (ret == AVERROR_EOF) {
-                // Flush decoder
-                avcodec_send_packet(m_codecCtx, nullptr);
-                continue;
-            }
-
-            // AVIO returned EOF because we ran out of fed data (not real EOF)
-            if (!m_eof) {
+            if (ret == AVERROR_EOF || ret == AVERROR(EIO)) {
+                if (m_eof) {
+                    // Real EOF — flush decoder to drain buffered frames
+                    avcodec_send_packet(m_codecCtx, nullptr);
+                    continue;
+                }
+                // Temporary data starvation — AVIO returned EOF because
+                // the input buffer was empty, not because the stream ended.
+                // Reset AVIO's EOF flag so av_read_frame will try again
+                // on the next call when more data has been fed.
+                if (m_avioCtx) {
+                    m_avioCtx->eof_reached = 0;
+                }
                 break;  // Need more feed() data
             }
-
-            // Real EOF from source
-            avcodec_send_packet(m_codecCtx, nullptr);
-            continue;
         }
     } else {
         // ── Mode B: raw PCM direct codec ──
