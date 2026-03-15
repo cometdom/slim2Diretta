@@ -54,6 +54,8 @@ LMS (network)
 
 **Threading**: main (init/signals) + slimproto (TCP LMS) + audio (HTTP->decode->push) + SDK worker (DirettaSync internal)
 
+**Startup**: `discoverTarget()` retries indefinitely (every 2s, log every 5s) until the Diretta target is found or the process is cancelled. Pass `std::atomic<bool>* stopSignal` to `enable()` to activate retry mode; without it, discovery fails immediately (legacy behavior).
+
 **Key Components**:
 
 | File | Purpose |
