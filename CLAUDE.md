@@ -70,7 +70,7 @@ LMS (network)
 | `src/Mp3Decoder.cpp/h` | MP3 decoder (libmpg123, optional) |
 | `src/OggDecoder.cpp/h` | Ogg Vorbis decoder (libvorbisfile, optional) |
 | `src/AacDecoder.cpp/h` | AAC decoder (fdk-aac, optional) |
-| `src/FfmpegDecoder.cpp/h` | FFmpeg decoder backend (libavcodec, optional) |
+| `src/FfmpegDecoder.cpp/h` | FFmpeg decoder backend (avformat/AVIO + direct codec, optional) |
 | `src/DsdProcessor.cpp/h` | DSD conversions (interleaved->planar, DoP->native) |
 | `diretta/DirettaSync.cpp/h` | Diretta SDK wrapper (shared with squeeze2diretta) |
 | `diretta/DirettaRingBuffer.h` | Lock-free SPSC ring buffer |
@@ -120,7 +120,7 @@ Key messages: HELO (registration), STAT (status), strm (stream control), audg (v
 - **POSIX threads** (pthreads)
 - **C++17 runtime**
 - **Optional**: libmpg123 (MP3), libvorbis (Ogg), fdk-aac (AAC)
-- **Optional**: libavcodec + libavutil (FFmpeg decoder backend, `--decoder ffmpeg`)
+- **Optional**: libavcodec + libavformat + libavutil (FFmpeg decoder backend, `--decoder ffmpeg`)
 
 SDK locations searched (in order):
 1. `$DIRETTA_SDK_PATH`
@@ -145,12 +145,17 @@ The audio thread (in `main.cpp`) handles HTTP reading, decoding, and ring buffer
 
 This pattern was aligned with DirettaRendererUPnP's audio engine for consistent delivery characteristics across both projects.
 
-## FFmpeg Raw PCM Notes
+## FFmpeg Decoder Architecture
 
-When FFmpeg is used without a demuxer (raw PCM fed directly to codec), two pitfalls:
-- **`block_align` is 0**: Must be set explicitly to `channels × bytes_per_sample` before `avcodec_open2()`, otherwise alignment guards are silently skipped
-- **PCM parser splits incorrectly**: Some FFmpeg versions provide a parser for `pcm_s24le` that splits data without respecting `block_align` — force `m_parser = nullptr` for raw PCM (format code `'p'`)
-- **Parser flush at EOF**: `av_parser_parse2()` buffers partial codec frames; must flush with `(NULL, 0)` before flushing the decoder to recover the last audio frame (critical for gapless transitions)
+FfmpegDecoder has two internal modes:
+
+- **Mode A — avformat/AVIO** (FLAC `'f'`, MP3 `'m'`, AAC `'a'`, Ogg `'o'`, ALAC `'l'`): Custom AVIO read callback bridges the push-based Decoder interface with FFmpeg's pull-based `avformat` demuxer. `feed()` fills an internal buffer; `av_read_frame()` triggers the AVIO callback which drains it. This is the same proven path used by DirettaRendererUPnP's AudioEngine. Requires `libavformat` in addition to `libavcodec`/`libavutil`. Minimum 128KB buffered before `avformat_open_input()` to allow header probing.
+
+- **Mode B — direct codec** (raw PCM `'p'`): No container headers → no demuxer. Data sent directly to `avcodec` with manual `block_align` alignment. Parser disabled (some FFmpeg versions split PCM data without respecting `block_align`).
+
+### Raw PCM Pitfalls (Mode B only)
+- **`block_align` is 0**: Must be set explicitly to `channels × bytes_per_sample` before `avcodec_open2()`
+- **PCM parser disabled**: Force `m_parser = nullptr` for raw PCM (format code `'p'`)
 
 ## Gapless Playback Strategy
 

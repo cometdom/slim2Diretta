@@ -46,11 +46,11 @@
                     "type": "select",
                     "cli_arg": "--decoder",
                     "label": "Decoder Backend",
-                    "description": "Audio decoder: native (libFLAC) or ffmpeg. FFmpeg may sound different due to its internal processing pipeline.",
+                    "description": "Audio decoder: native uses dedicated libraries (libFLAC, libmpg123, libvorbis). FFmpeg uses avformat/avcodec — same pipeline as DirettaRendererUPnP.",
                     "default": "",
                     "options": [
                         {"value": "", "label": "Native (default — libFLAC/libmpg123/libvorbis)"},
-                        {"value": "ffmpeg", "label": "FFmpeg (libavcodec)"}
+                        {"value": "ffmpeg", "label": "FFmpeg (avformat/avcodec)"}
                     ]
                 },
                 {
