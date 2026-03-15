@@ -163,6 +163,7 @@ Both backends produce lossless output. The sonic difference is subtle and stems 
 - **Quick resume**: Same-format track transitions without full reconnection
 - **Clean transitions**: Silence injection on pause/stop/format changes
 - **Auto-release**: Diretta target released after 5s idle for coexistence with other Diretta hosts
+- **Resilient startup**: Retries target discovery indefinitely if target is not yet available, with periodic status logging
 - **Advanced tuning**: Transfer mode, info cycle, target profile, and thread priority options
 
 ### Slimproto Protocol

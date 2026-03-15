@@ -2,9 +2,13 @@
 
 All notable changes to slim2diretta are documented in this file.
 
-## v1.2.0 (2026-03-12)
+## v1.2.0 (2026-03-15)
 
 ### Added
+
+- **Resilient target discovery**: When the Diretta target is not available at startup, the player now retries every 2 seconds (with status logged every 5 seconds) instead of exiting immediately. This is especially important on systems without systemd auto-restart (e.g., GentooPlayer with OpenRC). (Suggested by Filippo/GentooPlayer)
+
+- **Graceful DSD fallback**: DACs that do not support native DSD via Diretta no longer cause a crash. The error is logged and the track is skipped, with a suggestion to configure LMS for DoP output. (Reported by lalekuku)
 
 - **FFmpeg decoder backend** (`--decoder ffmpeg`): Alternative audio decoder using FFmpeg's libavcodec. Users can switch between the native backend (libFLAC/libmpg123/libvorbis) and FFmpeg for a different sonic signature. The native backend offers a brighter, more detailed sound; FFmpeg provides a warmer, more enveloping presentation with a wider soundstage. Both are lossless and theoretically bit-identical — the perceived difference likely stems from internal processing patterns (memory allocation, frame buffering, decode timing).
   - Parser-based architecture (no avformat needed) — lightweight, only libavcodec + libavutil
