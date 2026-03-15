@@ -159,10 +159,12 @@ bool FfmpegDecoder::initAvformat() {
         return false;
     }
     m_fmtCtx->pb = m_avioCtx;
-    // Minimize probing — we provide the format hint and don't call
-    // avformat_find_stream_info, so only the container header is needed.
+    // Minimize probing — we provide the format hint from Slimproto.
+    // probesize: small, just enough for container header detection.
+    // NOTE: max_analyze_duration is set AFTER avformat_open_input because
+    // open_input may reset it. Value of 0 means "auto" (5s default!),
+    // so we use 1 (1 microsecond) to truly minimize analysis.
     m_fmtCtx->probesize = 32768;
-    m_fmtCtx->max_analyze_duration = 0;
 
     // Hint the input format when we know it from Slimproto
     const AVInputFormat* inputFmt = nullptr;
@@ -187,9 +189,10 @@ bool FfmpegDecoder::initAvformat() {
         return false;
     }
 
-    // Minimal stream analysis — probesize and max_analyze_duration are
-    // already set to small values above, so this reads very little data.
-    // We provide the format hint, so only the container header is needed.
+    // Minimize stream analysis: 1 microsecond duration limit.
+    // Must be set AFTER avformat_open_input (which can reset values).
+    // 0 = auto-detect (5 seconds!), so use 1 to truly minimize.
+    m_fmtCtx->max_analyze_duration = 1;
     ret = avformat_find_stream_info(m_fmtCtx, nullptr);
     if (ret < 0) {
         char errbuf[128];
