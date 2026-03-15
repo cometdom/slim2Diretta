@@ -496,7 +496,12 @@ int main(int argc, char* argv[]) {
             direttaConfig.transferMode = DirettaTransferMode::AUTO;
     }
 
-    if (!diretta->enable(direttaConfig)) {
+    if (!diretta->enable(direttaConfig, &g_running)) {
+        if (!g_running.load(std::memory_order_acquire)) {
+            // Cancelled by signal — clean exit
+            shutdownAsyncLogging();
+            return 0;
+        }
         std::cerr << "Failed to enable Diretta target #" << config.direttaTarget << std::endl;
         shutdownAsyncLogging();
         return 1;

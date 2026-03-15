@@ -101,7 +101,8 @@ DirettaSync::~DirettaSync() {
 // Initialization (Enable/Disable like MPD)
 //=============================================================================
 
-bool DirettaSync::enable(const DirettaConfig& config) {
+bool DirettaSync::enable(const DirettaConfig& config,
+                         std::atomic<bool>* stopSignal) {
     if (m_enabled) {
         DIRETTA_LOG("Already enabled");
         return true;
@@ -110,7 +111,7 @@ bool DirettaSync::enable(const DirettaConfig& config) {
     m_config = config;
     DIRETTA_LOG("Enabling...");
 
-    if (!discoverTarget()) {
+    if (!discoverTarget(stopSignal)) {
         DIRETTA_LOG("Failed to discover target");
         return false;
     }
@@ -196,47 +197,87 @@ bool DirettaSync::openSyncConnection() {
 // Target Discovery
 //=============================================================================
 
-bool DirettaSync::discoverTarget() {
+bool DirettaSync::discoverTarget(std::atomic<bool>* stopSignal) {
     DIRETTA_LOG("Discovering Diretta target...");
 
-    DIRETTA::Find::Setting findSettings;
-    findSettings.Loopback = false;
-    findSettings.ProductID = 0;
-    findSettings.Name = "slim2diretta";
-    findSettings.MyID = 0x44525400;
+    auto lastLogTime = std::chrono::steady_clock::now();
+    bool firstAttempt = true;
 
-    DIRETTA::Find find(findSettings);
-    if (!find.open()) {
-        DIRETTA_LOG("Failed to open finder");
-        return false;
-    }
+    while (true) {
+        // Check stop signal (Ctrl+C, etc.)
+        if (stopSignal && !stopSignal->load(std::memory_order_acquire)) {
+            DIRETTA_LOG("Discovery cancelled");
+            return false;
+        }
 
-    DIRETTA::Find::PortResalts results;
-    if (!find.findOutput(results) || results.empty()) {
+        DIRETTA::Find::Setting findSettings;
+        findSettings.Loopback = false;
+        findSettings.ProductID = 0;
+        findSettings.Name = "slim2diretta";
+        findSettings.MyID = 0x44525400;
+
+        DIRETTA::Find find(findSettings);
+        if (!find.open()) {
+            DIRETTA_LOG("Failed to open finder");
+            if (!stopSignal) return false;  // No retry if no stop signal
+            std::this_thread::sleep_for(
+                std::chrono::milliseconds(DirettaRetry::DISCOVER_RETRY_MS));
+            continue;
+        }
+
+        DIRETTA::Find::PortResalts results;
+        bool found = find.findOutput(results) && !results.empty();
         find.close();
-        DIRETTA_LOG("No Diretta targets found");
-        return false;
+
+        if (found) {
+            if (!firstAttempt) {
+                std::cout << "[DirettaSync] Found target!" << std::endl;
+            }
+            DIRETTA_LOG("Found " << results.size() << " target(s)");
+
+            if (results.size() == 1 || m_targetIndex == 0) {
+                auto it = results.begin();
+                m_targetAddress = it->first;
+                DIRETTA_LOG("Selected: " << it->second.targetName);
+            } else if (m_targetIndex > 0 && m_targetIndex < static_cast<int>(results.size())) {
+                auto it = results.begin();
+                std::advance(it, m_targetIndex);
+                m_targetAddress = it->first;
+                DIRETTA_LOG("Selected target #" << (m_targetIndex + 1));
+            } else {
+                auto it = results.begin();
+                m_targetAddress = it->first;
+                DIRETTA_LOG("Selected first target: " << it->second.targetName);
+            }
+            return true;
+        }
+
+        // Target not found
+        if (!stopSignal) {
+            // No stop signal provided — legacy behavior, fail immediately
+            DIRETTA_LOG("No Diretta targets found");
+            return false;
+        }
+
+        // Log periodically (every 5 seconds)
+        auto now = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+            now - lastLogTime).count();
+        if (firstAttempt || elapsed >= DirettaRetry::DISCOVER_LOG_INTERVAL_MS) {
+            std::cout << "[DirettaSync] Target not found, retrying..." << std::endl;
+            lastLogTime = now;
+        }
+        firstAttempt = false;
+
+        // Wait before retry, checking stop signal periodically
+        for (int waited = 0; waited < DirettaRetry::DISCOVER_RETRY_MS; waited += 100) {
+            if (stopSignal && !stopSignal->load(std::memory_order_acquire)) {
+                DIRETTA_LOG("Discovery cancelled");
+                return false;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
     }
-
-    DIRETTA_LOG("Found " << results.size() << " target(s)");
-
-    if (results.size() == 1 || m_targetIndex == 0) {
-        auto it = results.begin();
-        m_targetAddress = it->first;
-        DIRETTA_LOG("Selected: " << it->second.targetName);
-    } else if (m_targetIndex > 0 && m_targetIndex < static_cast<int>(results.size())) {
-        auto it = results.begin();
-        std::advance(it, m_targetIndex);
-        m_targetAddress = it->first;
-        DIRETTA_LOG("Selected target #" << (m_targetIndex + 1));
-    } else {
-        auto it = results.begin();
-        m_targetAddress = it->first;
-        DIRETTA_LOG("Selected first target: " << it->second.targetName);
-    }
-
-    find.close();
-    return true;
 }
 
 bool DirettaSync::measureMTU() {
