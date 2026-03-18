@@ -14,6 +14,8 @@ All notable changes to slim2diretta are documented in this file.
 
 - **White noise on 24-bit DACs with FFmpeg decoder**: Two root causes fixed: (1) `audioFmt.bitDepth` was hardcoded to 32, causing the Diretta connection to open at 32-bit even for 24-bit sources — `main.cpp` now passes the actual source bit depth, and `configureSinkPCM` in DirettaSync now only offers 32-bit negotiation when the source is actually 32-bit; (2) FFmpeg's S32/S32P output is sign-extended (LSB-aligned), whereas all other decoders produce MSB-aligned int32_t — `FfmpegDecoder` now applies a left-shift (`32 - bitsPerRawSample`) to MSB-align samples before writing to the ring buffer. libFLAC was unaffected because its MSB-aligned output survived ALSA's 32→24-bit truncation correctly. (Reported by progman)
 
+- **High-rate WAV files wrong sample rate with FFmpeg decoder**: WAV files at non-standard rates (e.g., 705600 Hz) were played at 44100 Hz when using `--decoder ffmpeg`. The FFmpeg raw PCM path relied on the Slimproto `rate` field which cannot encode rates above ~192kHz, while the native PcmDecoder correctly reads the WAV header. PCM/WAV/AIFF format (`format=p`) now always uses the native PcmDecoder regardless of `--decoder` setting. FFmpeg is only used for compressed formats (FLAC, MP3, AAC, OGG). (Reported by abase)
+
 ## v1.2.0 (2026-03-15)
 
 ### Added

@@ -149,12 +149,20 @@ The audio thread (in `main.cpp`) handles HTTP reading, decoding, and ring buffer
 
 This pattern was aligned with DirettaRendererUPnP's audio engine for consistent delivery characteristics across both projects.
 
-## FFmpeg Raw PCM Notes
+## Decoder Routing
 
-When FFmpeg is used without a demuxer (raw PCM fed directly to codec), two pitfalls:
-- **`block_align` is 0**: Must be set explicitly to `channels × bytes_per_sample` before `avcodec_open2()`, otherwise alignment guards are silently skipped
-- **PCM parser splits incorrectly**: Some FFmpeg versions provide a parser for `pcm_s24le` that splits data without respecting `block_align` — force `m_parser = nullptr` for raw PCM (format code `'p'`)
-- **Parser flush at EOF**: `av_parser_parse2()` buffers partial codec frames; must flush with `(NULL, 0)` before flushing the decoder to recover the last audio frame (critical for gapless transitions)
+`Decoder::create()` in `Decoder.cpp` routes format codes to decoder implementations:
+- **`format=p` (PCM/WAV/AIFF)**: Always uses native `PcmDecoder`, even when `--decoder ffmpeg` is active. PcmDecoder parses WAV/AIFF headers to detect the true sample rate, which is critical for high-rate files (e.g., 705600 Hz). The Slimproto `rate` field cannot encode rates above ~192kHz (sent as `rate=3` → 44100 Hz).
+- **`format=d` (DSD)**: Always uses native DSD path (raw bitstream, not decoded).
+- **`format=f` (FLAC), MP3, AAC, OGG**: Use FFmpeg when `--decoder ffmpeg` is active, native otherwise.
+
+## FFmpeg Notes
+
+**Parser flush at EOF**: `av_parser_parse2()` buffers partial codec frames; must flush with `(NULL, 0)` before flushing the decoder to recover the last audio frame (critical for gapless transitions).
+
+**Raw PCM pitfalls** (historical — FFmpeg no longer handles raw PCM since v1.2.1):
+- `block_align` is 0 without a demuxer: must be set explicitly
+- PCM parser splits without respecting `block_align`: force `m_parser = nullptr`
 
 ## Bit Depth Handling
 
