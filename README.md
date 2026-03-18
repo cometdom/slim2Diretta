@@ -1,4 +1,4 @@
-# slim2diretta v1.2.0
+# slim2diretta v1.2.1
 
 **Native LMS Player with Diretta Output - Mono-Process Architecture**
 
@@ -8,7 +8,7 @@
 
 ---
 
-![Version](https://img.shields.io/badge/version-1.2.0-blue.svg)
+![Version](https://img.shields.io/badge/version-1.2.1-blue.svg)
 ![DSD](https://img.shields.io/badge/DSD-Native-green.svg)
 ![SDK](https://img.shields.io/badge/SDK-DIRETTA::Sync-orange.svg)
 
@@ -163,7 +163,7 @@ Both backends produce lossless output. The sonic difference is subtle and stems 
 - **Quick resume**: Same-format track transitions without full reconnection
 - **Clean transitions**: Silence injection on pause/stop/format changes
 - **Auto-release**: Diretta target released after 5s idle for coexistence with other Diretta hosts
-- **Resilient startup**: Retries target discovery indefinitely if target is not yet available, with periodic status logging
+- **Resilient startup**: Retries both Diretta target discovery and LMS server auto-discovery indefinitely if not yet available, with periodic status logging
 - **Advanced tuning**: Transfer mode, info cycle, target profile, and thread priority options
 
 ### Slimproto Protocol
@@ -210,6 +210,27 @@ Both backends produce lossless output. The sonic difference is subtle and stems 
 ---
 
 ## Upgrading
+
+### From v1.2.0 to v1.2.1
+
+```bash
+# 1. Stop the service
+sudo systemctl stop slim2diretta@1
+
+# 2. Pull and rebuild
+cd ~/slim2diretta
+git pull
+cd build && make -j$(nproc)
+
+# 3. Update the installed binary
+sudo cp slim2diretta /usr/local/bin/
+# Or: ./install.sh --update
+
+# 4. Restart the service
+sudo systemctl start slim2diretta@1
+```
+
+> **What's new in v1.2.1:** Bug fixes for FFmpeg decoder — 24-bit DACs with 32-bit-limited hardware now receive the correct 24-bit Diretta connection, 32-bit WAV files play correctly via FFmpeg, and LMS auto-discovery now retries indefinitely instead of exiting when LMS is temporarily offline.
 
 ### From v1.1.x to v1.2.0
 
@@ -785,4 +806,4 @@ This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) 
 
 **Enjoy native DSD and hi-res PCM streaming from your LMS library!**
 
-*Last updated: 2026-03-12 (v1.2.0)*
+*Last updated: 2026-03-18 (v1.2.1)*

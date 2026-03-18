@@ -54,7 +54,9 @@ LMS (network)
 
 **Threading**: main (init/signals) + slimproto (TCP LMS) + audio (HTTP->decode->push) + SDK worker (DirettaSync internal)
 
-**Startup**: `discoverTarget()` retries indefinitely (every 2s, log every 5s) until the Diretta target is found or the process is cancelled. Pass `std::atomic<bool>* stopSignal` to `enable()` to activate retry mode; without it, discovery fails immediately (legacy behavior).
+**Startup**: Both Diretta target discovery and LMS autodiscovery retry indefinitely:
+- `discoverTarget()` retries every 2s (log every 5s) until found or cancelled. Pass `std::atomic<bool>* stopSignal` to `enable()` to activate retry mode.
+- LMS autodiscovery (when no `-s` is specified) retries every 2s in a `while(g_running)` loop until LMS responds. Ctrl+C cancels cleanly.
 
 **Key Components**:
 
@@ -166,6 +168,8 @@ All decoders output **MSB-aligned int32_t** samples (4 bytes per sample in the r
 2. **Ring buffer input width** (`inputBps`): always 4 (int32_t), regardless of bit depth — derived from the `bitDepth == 32 || bitDepth == 24` formula.
 
 `push24BitPacked` uses hybrid S24 auto-detection (MSB-aligned vs LSB-aligned), with `MsbAligned` hint always set for all our decoders.
+
+**FFmpeg bit depth detection**: `bits_per_raw_sample` from FFmpeg is authoritative when set. When it is 0, raw PCM uses `m_rawBitDepth` (from the Slimproto strm command) — do NOT fall back to the `sample_fmt` heuristic for raw PCM, as S32 maps to 24 by default which corrupts 32-bit WAV data.
 
 ## Gapless Playback Strategy
 
