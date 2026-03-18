@@ -255,18 +255,24 @@ size_t FfmpegDecoder::readDecoded(int32_t* out, size_t maxFrames) {
             if (!m_formatReady) {
                 int bitsPerRawSample = m_codecCtx->bits_per_raw_sample;
                 if (bitsPerRawSample == 0) {
-                    switch (m_codecCtx->sample_fmt) {
-                        case AV_SAMPLE_FMT_S16:
-                        case AV_SAMPLE_FMT_S16P:
-                            bitsPerRawSample = 16; break;
-                        case AV_SAMPLE_FMT_S32:
-                        case AV_SAMPLE_FMT_S32P:
-                            bitsPerRawSample = 24; break;
-                        case AV_SAMPLE_FMT_FLT:
-                        case AV_SAMPLE_FMT_FLTP:
-                            bitsPerRawSample = 32; break;
-                        default:
-                            bitsPerRawSample = 16; break;
+                    // For raw PCM, m_rawBitDepth is authoritative (set from strm command).
+                    // For compressed formats, fall back to sample_fmt heuristics.
+                    if (m_rawPcmConfigured && m_rawBitDepth > 0) {
+                        bitsPerRawSample = static_cast<int>(m_rawBitDepth);
+                    } else {
+                        switch (m_codecCtx->sample_fmt) {
+                            case AV_SAMPLE_FMT_S16:
+                            case AV_SAMPLE_FMT_S16P:
+                                bitsPerRawSample = 16; break;
+                            case AV_SAMPLE_FMT_S32:
+                            case AV_SAMPLE_FMT_S32P:
+                                bitsPerRawSample = 24; break;
+                            case AV_SAMPLE_FMT_FLT:
+                            case AV_SAMPLE_FMT_FLTP:
+                                bitsPerRawSample = 32; break;
+                            default:
+                                bitsPerRawSample = 16; break;
+                        }
                     }
                 }
                 m_format.sampleRate = static_cast<uint32_t>(m_codecCtx->sample_rate);
