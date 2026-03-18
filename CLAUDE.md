@@ -154,6 +154,19 @@ When FFmpeg is used without a demuxer (raw PCM fed directly to codec), two pitfa
 - **PCM parser splits incorrectly**: Some FFmpeg versions provide a parser for `pcm_s24le` that splits data without respecting `block_align` — force `m_parser = nullptr` for raw PCM (format code `'p'`)
 - **Parser flush at EOF**: `av_parser_parse2()` buffers partial codec frames; must flush with `(NULL, 0)` before flushing the decoder to recover the last audio frame (critical for gapless transitions)
 
+## Bit Depth Handling
+
+All decoders output **MSB-aligned int32_t** samples (4 bytes per sample in the ring buffer):
+- 24-bit FLAC: `sample << 8` → upper 24 bits set, LSByte = 0x00
+- 16-bit FLAC: `sample << 16` → upper 16 bits set, lower 2 bytes = 0x00
+- FFmpeg: requests `AV_SAMPLE_FMT_S32`, FLAC gives MSB-aligned 24-bit in S32 container
+
+`audioFmt.bitDepth` in `main.cpp` reflects the **source bit depth** (24 for 24-bit content, 32 otherwise). This drives two things:
+1. **Diretta format negotiation** (`configureSinkPCM`): only offers 32-bit if source is ≥32-bit. Prevents white noise on DACs that report 32-bit support at the Diretta target level but are physically limited to 24-bit.
+2. **Ring buffer input width** (`inputBps`): always 4 (int32_t), regardless of bit depth — derived from the `bitDepth == 32 || bitDepth == 24` formula.
+
+`push24BitPacked` uses hybrid S24 auto-detection (MSB-aligned vs LSB-aligned), with `MsbAligned` hint always set for all our decoders.
+
 ## Gapless Playback Strategy
 
 - **Shared decode cache**: `decodeCache`, `decodeCachePos`, `direttaOpened`, `audioFmt` persist across gapless same-format tracks (outside the chaining `while(true)` loop)

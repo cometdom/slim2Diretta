@@ -2,6 +2,12 @@
 
 All notable changes to slim2diretta are documented in this file.
 
+## v1.2.1 (2026-03-18)
+
+### Fixed
+
+- **White noise on 24-bit DACs with FFmpeg decoder**: When decoding a 24-bit source, `audioFmt.bitDepth` was hardcoded to 32, causing the Diretta connection to open at 32-bit. Some DACs report 32-bit support at the Diretta target level but are physically limited to 24-bit, leading to white noise. Fix: (1) `main.cpp` now passes the actual source bit depth (24) to DirettaSync; (2) `configureSinkPCM` in DirettaSync now only offers 32-bit negotiation when the source is actually 32-bit. 24-bit sources now correctly open a 24-bit Diretta connection. (Reported by progman)
+
 ## v1.2.0 (2026-03-15)
 
 ### Added

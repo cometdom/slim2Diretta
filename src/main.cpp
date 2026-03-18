@@ -1107,7 +1107,7 @@ int main(int argc, char* argv[]) {
 
                             detectedChannels = fmt.channels;
                             audioFmt.sampleRate = fmt.sampleRate;
-                            audioFmt.bitDepth = 32;
+                            audioFmt.bitDepth = (fmt.bitDepth == 24) ? 24 : 32;
                             audioFmt.channels = fmt.channels;
                             audioFmt.isCompressed = (curFormatCode == FORMAT_FLAC ||
                                                      curFormatCode == FORMAT_MP3 ||
