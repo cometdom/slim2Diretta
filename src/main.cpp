@@ -439,16 +439,23 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
-    // Validate required parameters — autodiscover LMS if not specified
+    // Autodiscover LMS if not specified — retry indefinitely like Diretta target discovery
     if (config.lmsServer.empty()) {
         std::cout << "No LMS server specified, searching..." << std::endl;
-        config.lmsServer = discoverLMS();
-        if (config.lmsServer.empty()) {
-            std::cerr << "Error: Could not discover LMS server" << std::endl;
-            std::cerr << "Specify manually with -s <ip>" << std::endl;
-            shutdownAsyncLogging();
-            return 1;
+        int logCycle = 0;
+        while (g_running.load(std::memory_order_acquire)) {
+            config.lmsServer = discoverLMS(2, 1);  // 1 attempt, 2s timeout
+            if (!config.lmsServer.empty()) break;
+            if (++logCycle % 5 == 0) {
+                std::cout << "Still searching for LMS server..." << std::endl;
+            }
         }
+        if (config.lmsServer.empty()) {
+            // Cancelled by signal
+            shutdownAsyncLogging();
+            return 0;
+        }
+        std::cout << "Found LMS server: " << config.lmsServer << std::endl;
     }
 
     if (config.direttaTarget < 1) {

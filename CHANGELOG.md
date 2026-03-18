@@ -4,6 +4,10 @@ All notable changes to slim2diretta are documented in this file.
 
 ## v1.2.1 (2026-03-18)
 
+### Changed
+
+- **Resilient LMS autodiscovery**: When no LMS server is specified (`-s`) and the server is not immediately discoverable, slim2diretta now retries indefinitely (every 2 seconds) instead of exiting with an error. This is consistent with the Diretta target discovery behavior and prevents startup failures when LMS is temporarily offline or still booting. Press Ctrl+C to cancel. (Suggested by Filippo/GentooPlayer)
+
 ### Fixed
 
 - **White noise on 24-bit DACs with FFmpeg decoder**: Two root causes fixed: (1) `audioFmt.bitDepth` was hardcoded to 32, causing the Diretta connection to open at 32-bit even for 24-bit sources — `main.cpp` now passes the actual source bit depth, and `configureSinkPCM` in DirettaSync now only offers 32-bit negotiation when the source is actually 32-bit; (2) FFmpeg's S32/S32P output is sign-extended (LSB-aligned), whereas all other decoders produce MSB-aligned int32_t — `FfmpegDecoder` now applies a left-shift (`32 - bitsPerRawSample`) to MSB-align samples before writing to the ring buffer. libFLAC was unaffected because its MSB-aligned output survived ALSA's 32→24-bit truncation correctly. (Reported by progman)
