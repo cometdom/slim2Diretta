@@ -279,14 +279,11 @@ size_t FfmpegDecoder::readDecoded(int32_t* out, size_t maxFrames) {
                 m_format.channels = static_cast<uint32_t>(m_codecCtx->ch_layout.nb_channels);
                 m_format.bitDepth = static_cast<uint32_t>(bitsPerRawSample);
                 m_format.totalSamples = 0;
-                // S32/S32P: FFmpeg sign-extends to fill int32_t (LSB-aligned).
-                // Shift left to MSB-align, consistent with libFLAC and all other decoders.
+                // No m_s32Shift needed: FFmpeg decoders already produce
+                // MSB-aligned S32 output (FLAC shifts by 32-bps internally,
+                // float codecs scale to full 32-bit range via swr_convert).
+                // Raw PCM is handled by PcmDecoder since v1.2.1.
                 m_s32Shift = 0;
-                if ((m_codecCtx->sample_fmt == AV_SAMPLE_FMT_S32 ||
-                     m_codecCtx->sample_fmt == AV_SAMPLE_FMT_S32P) &&
-                    bitsPerRawSample < 32) {
-                    m_s32Shift = 32 - bitsPerRawSample;
-                }
                 m_formatReady = true;
 
                 LOG_INFO("[FFmpeg] Format: "
