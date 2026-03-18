@@ -200,13 +200,13 @@ void FfmpegDecoder::convertFrame() {
                 case AV_SAMPLE_FMT_S32: {
                     const int32_t* data = reinterpret_cast<const int32_t*>(
                         m_frame->data[0]);
-                    sample = data[s * numChannels + ch];
+                    sample = data[s * numChannels + ch] << m_s32Shift;
                     break;
                 }
                 case AV_SAMPLE_FMT_S32P: {
                     const int32_t* data = reinterpret_cast<const int32_t*>(
                         m_frame->data[ch]);
-                    sample = data[s];
+                    sample = data[s] << m_s32Shift;
                     break;
                 }
                 case AV_SAMPLE_FMT_FLT: {
@@ -273,6 +273,14 @@ size_t FfmpegDecoder::readDecoded(int32_t* out, size_t maxFrames) {
                 m_format.channels = static_cast<uint32_t>(m_codecCtx->ch_layout.nb_channels);
                 m_format.bitDepth = static_cast<uint32_t>(bitsPerRawSample);
                 m_format.totalSamples = 0;
+                // S32/S32P: FFmpeg sign-extends to fill int32_t (LSB-aligned).
+                // Shift left to MSB-align, consistent with libFLAC and all other decoders.
+                m_s32Shift = 0;
+                if ((m_codecCtx->sample_fmt == AV_SAMPLE_FMT_S32 ||
+                     m_codecCtx->sample_fmt == AV_SAMPLE_FMT_S32P) &&
+                    bitsPerRawSample < 32) {
+                    m_s32Shift = 32 - bitsPerRawSample;
+                }
                 m_formatReady = true;
 
                 LOG_INFO("[FFmpeg] Format: "

@@ -73,6 +73,7 @@ private:
     // Format info
     DecodedFormat m_format;
     bool m_formatReady = false;
+    int m_s32Shift = 0;  // Left-shift to MSB-align S32/S32P samples (e.g. 8 for 24-bit)
 
     // Raw PCM hint (from strm command, for headerless PCM)
     bool m_rawPcmConfigured = false;

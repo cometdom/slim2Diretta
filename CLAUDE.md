@@ -157,9 +157,9 @@ When FFmpeg is used without a demuxer (raw PCM fed directly to codec), two pitfa
 ## Bit Depth Handling
 
 All decoders output **MSB-aligned int32_t** samples (4 bytes per sample in the ring buffer):
-- 24-bit FLAC: `sample << 8` → upper 24 bits set, LSByte = 0x00
-- 16-bit FLAC: `sample << 16` → upper 16 bits set, lower 2 bytes = 0x00
-- FFmpeg: requests `AV_SAMPLE_FMT_S32`, FLAC gives MSB-aligned 24-bit in S32 container
+- 24-bit FLAC (libFLAC): `sample << 8` → upper 24 bits set, LSByte = 0x00
+- 16-bit FLAC (libFLAC): `sample << 16` → upper 16 bits set, lower 2 bytes = 0x00
+- FFmpeg (S32/S32P): FFmpeg sign-extends to int32_t (LSB-aligned); `FfmpegDecoder` applies `<< m_s32Shift` (= `32 - bitsPerRawSample`) to MSB-align before writing to the ring buffer. `m_s32Shift` is computed at first frame detection.
 
 `audioFmt.bitDepth` in `main.cpp` reflects the **source bit depth** (24 for 24-bit content, 32 otherwise). This drives two things:
 1. **Diretta format negotiation** (`configureSinkPCM`): only offers 32-bit if source is ≥32-bit. Prevents white noise on DACs that report 32-bit support at the Diretta target level but are physically limited to 24-bit.
