@@ -25,8 +25,10 @@
 std::unique_ptr<Decoder> Decoder::create(char formatCode,
                                           const std::string& backend) {
 #ifdef ENABLE_FFMPEG
-    // FFmpeg backend handles all formats except DSD (raw bitstream)
-    if (backend == "ffmpeg" && formatCode != FORMAT_DSD) {
+    // FFmpeg backend handles compressed formats (FLAC, MP3, AAC, OGG).
+    // PCM uses native decoder (parses WAV/AIFF headers for true sample rate).
+    // DSD is raw bitstream — not decoded.
+    if (backend == "ffmpeg" && formatCode != FORMAT_DSD && formatCode != FORMAT_PCM) {
         LOG_DEBUG("[Decoder] Using FFmpeg backend for format '" << formatCode << "'");
         return std::make_unique<FfmpegDecoder>(formatCode);
     }
