@@ -876,6 +876,7 @@ uninstall() {
     echo "This will remove:"
     echo "  - Binary: $INSTALL_BIN/slim2diretta"
     echo "  - Service: $SERVICE_FILE"
+    echo "  - Web UI (if installed)"
     echo "  - Configuration: $CONFIG_FILE (optional)"
     echo ""
 
@@ -910,6 +911,28 @@ uninstall() {
             print_success "Configuration removed"
         else
             print_info "Configuration kept: $CONFIG_FILE"
+        fi
+    fi
+
+    # Remove web UI if installed
+    local WEBUI_SERVICE="/etc/systemd/system/slim2diretta-webui.service"
+    local WEBUI_DIR="/opt/slim2diretta/webui"
+    if [ -f "$WEBUI_SERVICE" ] || [ -d "$WEBUI_DIR" ]; then
+        if confirm "Remove web configuration UI?"; then
+            sudo systemctl stop slim2diretta-webui.service 2>/dev/null || true
+            sudo systemctl disable slim2diretta-webui.service 2>/dev/null || true
+            if [ -f "$WEBUI_SERVICE" ]; then
+                sudo rm "$WEBUI_SERVICE"
+                sudo systemctl daemon-reload
+            fi
+            if [ -d "$WEBUI_DIR" ]; then
+                sudo rm -rf "$WEBUI_DIR"
+            fi
+            # Remove parent dir if empty
+            sudo rmdir /opt/slim2diretta 2>/dev/null || true
+            print_success "Web UI removed"
+        else
+            print_info "Web UI kept"
         fi
     fi
 
