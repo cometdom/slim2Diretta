@@ -580,7 +580,10 @@ update_binary() {
     fi
 
     # Stop running service
-    local running_instances=$(systemctl is-active slim2diretta.service 2>/dev/null && echo "slim2diretta.service" || true)
+    local running_instances=""
+    if systemctl is-active --quiet slim2diretta.service 2>/dev/null; then
+        running_instances="slim2diretta.service"
+    fi
 
     if [ -n "$running_instances" ]; then
         print_info "Stopping running instances..."
