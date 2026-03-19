@@ -169,10 +169,10 @@ This pattern was aligned with DirettaRendererUPnP's audio engine for consistent 
 All decoders output **MSB-aligned int32_t** samples (4 bytes per sample in the ring buffer):
 - 24-bit FLAC (libFLAC): `sample << 8` → upper 24 bits set, LSByte = 0x00
 - 16-bit FLAC (libFLAC): `sample << 16` → upper 16 bits set, lower 2 bytes = 0x00
-- FFmpeg (S32/S32P): FFmpeg sign-extends to int32_t (LSB-aligned); `FfmpegDecoder` applies `<< m_s32Shift` (= `32 - bitsPerRawSample`) to MSB-align before writing to the ring buffer. `m_s32Shift` is computed at first frame detection.
+- FFmpeg (S32/S32P): FFmpeg decoders already produce MSB-aligned S32 output (FLAC shifts internally by `32-bps`, float codecs scale to full 32-bit range). No additional shift is needed — `m_s32Shift` was removed in v1.2.1.
 
-`audioFmt.bitDepth` in `main.cpp` reflects the **source bit depth** (24 for 24-bit content, 32 otherwise). This drives two things:
-1. **Diretta format negotiation** (`configureSinkPCM`): only offers 32-bit if source is ≥32-bit. Prevents white noise on DACs that report 32-bit support at the Diretta target level but are physically limited to 24-bit.
+`audioFmt.bitDepth` in `main.cpp` reflects the **source bit depth** (24 for ≤24-bit content, 32 otherwise). This drives two things:
+1. **Diretta format negotiation** (`configureSinkPCM`): only offers 32-bit if source is ≥32-bit. Prevents white noise/silence on DACs that report 32-bit support at the Diretta target level but are physically limited to 24-bit. Both 16-bit and 24-bit sources open at 24-bit (`fmt.bitDepth <= 24`).
 2. **Ring buffer input width** (`inputBps`): always 4 (int32_t), regardless of bit depth — derived from the `bitDepth == 32 || bitDepth == 24` formula.
 
 `push24BitPacked` uses hybrid S24 auto-detection (MSB-aligned vs LSB-aligned), with `MsbAligned` hint always set for all our decoders.

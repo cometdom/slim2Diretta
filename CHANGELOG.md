@@ -12,6 +12,8 @@ All notable changes to slim2diretta are documented in this file.
 
 - **install.sh: uninstall did not remove web UI**: The uninstall function now also stops/disables `slim2diretta-webui.service` and removes `/opt/slim2diretta/webui/` when installed.
 
+- **No sound on 16-bit FLAC with 24-bit DACs**: The bit depth formula mapped 16-bit sources to 32-bit Diretta connections (`== 24` only matched 24-bit). DACs that report 32-bit support but physically only handle 24-bit produced no sound. Changed to `<= 24` so both 16-bit and 24-bit sources open at 24-bit. Only true 32-bit content opens at 32-bit.
+
 ## v1.2.1 (2026-03-18)
 
 ### Changed
