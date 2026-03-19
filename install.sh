@@ -21,7 +21,7 @@ CONFIG_FILE="/etc/default/slim2diretta"
 # Auto-detect latest Diretta SDK version
 detect_latest_sdk() {
     local sdk_found=$(find "$HOME" . .. /opt "$HOME/audio" /usr/local \
-        -maxdepth 1 -type d -name 'DirettaHostSDK_*' 2>/dev/null | sort -V | tail -1)
+        -maxdepth 1 -type d -name 'DirettaHostSDK_*' 2>/dev/null | sort -V | tail -1 | xargs realpath 2>/dev/null)
 
     if [ -n "$sdk_found" ]; then
         echo "$sdk_found"
