@@ -287,7 +287,7 @@ build_slim2diretta() {
 
     # Configure with CMake
     print_info "Configuring with CMake..."
-    export DIRETTA_SDK_PATH="$SDK_PATH"
+    export DIRETTA_SDK_PATH="$(realpath "$SDK_PATH")"
     cmake ..
 
     # Build
