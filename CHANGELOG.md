@@ -2,6 +2,16 @@
 
 All notable changes to slim2diretta are documented in this file.
 
+## v1.2.2 (2026-03-19)
+
+### Fixed
+
+- **install.sh: SDK path broken after `cd build`**: `find` could return relative paths (e.g., `./DirettaHostSDK_148`) which became invalid after `cd build`. Now resolved to absolute paths via `realpath`. (Reported by sheviks, [#6](https://github.com/cometdom/slim2Diretta/issues/6))
+
+- **install.sh: "Failed to stop inactive.service"**: Option 4 (Update binary) tried to stop `inactive.service` when the service was already stopped, because `systemctl is-active` returns the text "inactive". Now uses `--quiet` flag to check exit code only.
+
+- **install.sh: uninstall did not remove web UI**: The uninstall function now also stops/disables `slim2diretta-webui.service` and removes `/opt/slim2diretta/webui/` when installed.
+
 ## v1.2.1 (2026-03-18)
 
 ### Changed
