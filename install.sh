@@ -283,11 +283,14 @@ build_slim2diretta() {
         rm -rf build
     fi
     mkdir -p build
+
+    # Resolve SDK path before cd build (relative paths break after cd)
+    export DIRETTA_SDK_PATH="$(realpath "$SDK_PATH")"
+
     cd build
 
     # Configure with CMake
     print_info "Configuring with CMake..."
-    export DIRETTA_SDK_PATH="$(realpath "$SDK_PATH")"
     cmake ..
 
     # Build
