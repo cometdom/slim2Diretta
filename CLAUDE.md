@@ -179,6 +179,11 @@ All decoders output **MSB-aligned int32_t** samples (4 bytes per sample in the r
 
 **FFmpeg bit depth detection**: `bits_per_raw_sample` from FFmpeg is authoritative when set. When it is 0, raw PCM uses `m_rawBitDepth` (from the Slimproto strm command) — do NOT fall back to the `sample_fmt` heuristic for raw PCM, as S32 maps to 24 by default which corrupts 32-bit WAV data.
 
+## Hot-Path Performance
+
+- **`DIRETTA_LOG_ASYNC_FMT`**: RT-safe logging macro using `snprintf` on a stack-local `char[248]`. Used in `sendAudio` and `getNewStream` callbacks instead of `DIRETTA_LOG_ASYNC` (which uses `std::ostringstream` → heap allocation). The legacy `DIRETTA_LOG_ASYNC` is kept for non-critical paths.
+- **PcmDecoder read-offset**: `m_dataPos` advances through `m_dataBuf` instead of `vector::erase()` on every `readDecoded()` call. Compaction only when `m_dataPos >= 64KB` (`DATA_COMPACT_THRESHOLD`). Eliminates O(n) `memmove` from the decode hot path.
+
 ## Gapless Playback Strategy
 
 - **Shared decode cache**: `decodeCache`, `decodeCachePos`, `direttaOpened`, `audioFmt` persist across gapless same-format tracks (outside the chaining `while(true)` loop)
