@@ -2,7 +2,13 @@
 
 All notable changes to slim2diretta are documented in this file.
 
-## v1.2.2 (2026-03-19)
+## v1.2.2 (2026-03-20)
+
+### Performance
+
+- **RT-safe async logging**: Hot-path logging in `sendAudio` and `getNewStream` callbacks now uses `snprintf` on a stack-local buffer (`DIRETTA_LOG_ASYNC_FMT`) instead of `std::ostringstream` which heap-allocates on every call. Zero heap allocation on the audio critical path. (Inspired by leeeanh's RT jitter reduction work)
+
+- **PcmDecoder read-offset**: Replace `O(n)` `vector::erase` on every `readDecoded()` call with a read-offset (`m_dataPos`). Compaction only occurs when the offset exceeds 64 KB. Eliminates `memmove` from the PCM decode hot path. (Inspired by leeeanh's RT jitter reduction work)
 
 ### Fixed
 
