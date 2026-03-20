@@ -62,9 +62,8 @@ public:
         m_entries[wp].timestamp_us = std::chrono::duration_cast<std::chrono::microseconds>(
             now.time_since_epoch()).count();
 
-        // Copy message (truncate if needed)
-        strncpy(m_entries[wp].message, msg, sizeof(m_entries[wp].message) - 1);
-        m_entries[wp].message[sizeof(m_entries[wp].message) - 1] = '\0';
+        // Copy message (truncate if needed) — snprintf avoids strncpy warning
+        snprintf(m_entries[wp].message, sizeof(m_entries[wp].message), "%s", msg);
 
         m_writePos.store((wp + 1) & MASK, std::memory_order_release);
         return true;
@@ -118,12 +117,21 @@ extern int g_rtPriority;
     } \
 } while(0)
 
-// Async logging macro for hot paths (non-blocking)
+// Legacy stream-style async log — kept for non-critical paths
 #define DIRETTA_LOG_ASYNC(msg) do { \
     if (g_logRing && g_logLevel >= LogLevel::DEBUG) { \
         std::ostringstream _oss; \
         _oss << msg; \
         g_logRing->push(_oss.str().c_str()); \
+    } \
+} while(0)
+
+// RT-safe async log — stack buffer only, no heap allocation
+#define DIRETTA_LOG_ASYNC_FMT(fmt, ...) do { \
+    if (g_logRing && g_logLevel >= LogLevel::DEBUG) { \
+        char _buf[248]; \
+        snprintf(_buf, sizeof(_buf), fmt, ##__VA_ARGS__); \
+        g_logRing->push(_buf); \
     } \
 } while(0)
 #endif
