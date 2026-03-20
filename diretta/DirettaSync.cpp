@@ -1554,10 +1554,10 @@ size_t DirettaSync::sendAudio(const uint8_t* data, size_t numSamples) {
         if (g_verbose) {
             int count = m_pushCount.fetch_add(1, std::memory_order_relaxed) + 1;
             if (count <= 3 || count % 500 == 0) {
-                // A3: Async logging in hot path - avoids cout blocking
-                DIRETTA_LOG_ASYNC("sendAudio #" << count << " in=" << totalBytes
-                                  << " out=" << written << " avail=" << m_ringBuffer.getAvailable()
-                                  << " [" << formatLabel << "]");
+                // A3: Async logging in hot path - zero heap allocation
+                DIRETTA_LOG_ASYNC_FMT("sendAudio #%d in=%zu out=%zu avail=%zu [%s]",
+                                      count, totalBytes, written,
+                                      m_ringBuffer.getAvailable(), formatLabel);
             }
         }
     }
@@ -1747,10 +1747,10 @@ bool DirettaSync::getNewStream(diretta_stream& baseStream) {
 
     if (g_verbose && (count <= 5 || count % 5000 == 0)) {
         float fillPct = (currentRingSize > 0) ? (100.0f * avail / currentRingSize) : 0.0f;
-        // A3: Async logging in hot path - avoids cout blocking in Diretta callback
-        DIRETTA_LOG_ASYNC("getNewStream #" << count << " bpb=" << currentBytesPerBuffer
-                          << " avail=" << avail << " (" << std::fixed << std::setprecision(1)
-                          << fillPct << "%) " << (currentIsDsd ? "[DSD]" : "[PCM]"));
+        // A3: Async logging in hot path - zero heap allocation
+        DIRETTA_LOG_ASYNC_FMT("getNewStream #%d bpb=%d avail=%zu (%.1f%%) [%s]",
+                              count, currentBytesPerBuffer, avail, fillPct,
+                              currentIsDsd ? "DSD" : "PCM");
     }
 
     // Rebuffering: hold silence until buffer recovers to threshold

@@ -67,7 +67,7 @@ size_t PcmDecoder::readDecoded(int32_t* out, size_t maxFrames) {
     if (bytesPerFrame == 0) return 0;
 
     // Limit by available data and remaining chunk size
-    size_t availBytes = m_dataBuf.size();
+    size_t availBytes = m_dataBuf.size() - m_dataPos;
     if (m_dataRemaining > 0) {
         availBytes = std::min(availBytes, static_cast<size_t>(m_dataRemaining));
     }
@@ -87,15 +87,21 @@ size_t PcmDecoder::readDecoded(int32_t* out, size_t maxFrames) {
     }
 
     size_t bytesToConvert = framesToConvert * bytesPerFrame;
-    convertSamples(m_dataBuf.data(), out, bytesToConvert);
+    convertSamples(m_dataBuf.data() + m_dataPos, out, bytesToConvert);
 
-    // Consume from data buffer
-    m_dataBuf.erase(m_dataBuf.begin(), m_dataBuf.begin() + bytesToConvert);
+    // Advance read offset instead of O(n) erase
+    m_dataPos += bytesToConvert;
     if (m_dataRemaining > 0) {
         m_dataRemaining -= bytesToConvert;
         if (m_dataRemaining == 0) {
             m_finished = true;
         }
+    }
+
+    // Compact when offset exceeds threshold to reclaim memory
+    if (m_dataPos >= DATA_COMPACT_THRESHOLD) {
+        m_dataBuf.erase(m_dataBuf.begin(), m_dataBuf.begin() + m_dataPos);
+        m_dataPos = 0;
     }
 
     m_decodedSamples += framesToConvert;
@@ -117,6 +123,7 @@ void PcmDecoder::flush() {
     m_state = State::DETECT;
     m_headerBuf.clear();
     m_dataBuf.clear();
+    m_dataPos = 0;
     m_format = {};
     m_formatReady = false;
     m_bigEndian = false;

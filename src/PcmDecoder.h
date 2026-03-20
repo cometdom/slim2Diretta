@@ -47,6 +47,8 @@ private:
 
     // PCM data buffer (raw bytes before conversion)
     std::vector<uint8_t> m_dataBuf;
+    size_t m_dataPos = 0;  // Read offset into m_dataBuf (avoids O(n) erase)
+    static constexpr size_t DATA_COMPACT_THRESHOLD = 65536;  // Compact when offset exceeds this
 
     // Format
     DecodedFormat m_format;
