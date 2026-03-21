@@ -190,6 +190,7 @@ All decoders output **MSB-aligned int32_t** samples (4 bytes per sample in the r
 - **Same-format continuation**: If next track has same sample rate and channels, skip Diretta close/reopen — just keep pushing to the ring buffer
 - **Format change**: Drain remaining cache, close Diretta, reopen with new format
 - **STMd timing**: Sent at HTTP EOF, but decode cache may still have seconds of audio buffered — LMS handles track counter advancement
+- **Clean end-of-track**: After gapless wait timeout (no next track), `stopPlayback(false)` sends silence buffers before the ring buffer drains. Prevents underruns that Roon interprets as errors (refusing to start the next track). LMS tolerates underruns; Roon does not.
 
 ## Web UI
 
