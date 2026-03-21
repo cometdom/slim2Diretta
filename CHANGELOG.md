@@ -2,6 +2,12 @@
 
 All notable changes to slim2diretta are documented in this file.
 
+## v1.2.3 (2026-03-21)
+
+### Fixed
+
+- **Roon: next track not starting after gapless transition**: When the decode cache drained and no next track arrived within the 2-second gapless wait, the ring buffer would underrun. Roon interprets underruns as errors and refuses to start the next track. Now stops playback gracefully with silence buffers before the ring buffer drains, so Roon receives a clean end-of-track signal (STMu) instead of an underrun. (Reported by PatrickW)
+
 ## v1.2.2 (2026-03-20)
 
 ### Performance
