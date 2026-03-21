@@ -1384,7 +1384,7 @@ int main(int argc, char* argv[]) {
                             }
                         }
 
-                        // Wait for LMS to send next strm-s
+                        // Wait for LMS/Roon to send next strm-s
                         if (!hasPendingTrack.load(std::memory_order_acquire) &&
                             audioTestRunning.load(std::memory_order_acquire)) {
                             LOG_DEBUG("[Gapless] PCM: waiting for next track...");
@@ -1395,6 +1395,18 @@ int main(int argc, char* argv[]) {
                                    std::chrono::duration_cast<std::chrono::milliseconds>(
                                        std::chrono::steady_clock::now() - waitStart).count() < GAPLESS_WAIT_MS) {
                                 std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                            }
+
+                            // No next track arrived — stop playback gracefully
+                            // BEFORE the ring buffer drains and causes an underrun.
+                            // Roon interprets underruns as errors and won't start
+                            // the next track; a clean stop avoids this.
+                            if (!hasPendingTrack.load(std::memory_order_acquire) &&
+                                audioTestRunning.load(std::memory_order_acquire)) {
+                                LOG_INFO("[Gapless] No next track — stopping playback cleanly");
+                                if (direttaOpened) {
+                                    direttaPtr->stopPlayback(false);
+                                }
                             }
                         }
                     } else {
