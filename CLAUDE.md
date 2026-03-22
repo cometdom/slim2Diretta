@@ -191,6 +191,8 @@ All decoders output **MSB-aligned int32_t** samples (4 bytes per sample in the r
 - **Format change**: Drain remaining cache, close Diretta, reopen with new format
 - **STMd timing**: Sent at HTTP EOF, but decode cache may still have seconds of audio buffered — LMS handles track counter advancement
 - **Clean end-of-track**: After gapless wait timeout (no next track), `stopPlayback(false)` sends silence buffers before the ring buffer drains. Prevents underruns that Roon interprets as errors (refusing to start the next track). LMS tolerates underruns; Roon does not.
+- **open() failure in gapless**: If `open()` fails during a format change in gapless chaining, `openFailedInGapless` flag prevents STMu from being sent after STMn. Without this, LMS receives STMn+STMu and skips to the next track.
+- **Timed worker join**: `joinWorkerWithTimeout(1000ms)` replaces bare `m_workerThread.join()` in all format transition paths to prevent indefinite blocking when the SDK worker is unresponsive.
 
 ## Web UI
 

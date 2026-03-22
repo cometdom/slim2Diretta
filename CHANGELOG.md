@@ -2,6 +2,14 @@
 
 All notable changes to slim2diretta are documented in this file.
 
+## v1.2.4 (2026-03-22)
+
+### Fixed
+
+- **Tracks skipping during gapless format transitions**: When `open()` failed during a gapless PCM format change (e.g., 44.1kHz→96kHz), slim2diretta sent STMn (error) followed by STMu (track ended), causing LMS to skip to the next track prematurely. STMu is now suppressed after an open failure. (Reported by Jeep972)
+
+- **Worker thread join timeout**: Replaced bare `m_workerThread.join()` calls (which could block indefinitely) with `joinWorkerWithTimeout(1000ms)` in all format transition paths. Prevents hangs when the SDK worker thread is unresponsive during format changes.
+
 ## v1.2.3 (2026-03-21)
 
 ### Fixed
