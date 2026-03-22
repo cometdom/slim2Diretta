@@ -509,6 +509,7 @@ private:
     bool reopenForFormatChange();
     void fullReset();
     void shutdownWorker();
+    bool joinWorkerWithTimeout(int timeoutMs = 1000);  // Timed worker thread join
 
     void configureSinkPCM(int rate, int channels, int inputBits, int& acceptedBits);
     bool configureSinkDSD(uint32_t dsdBitRate, int channels, const AudioFormat& format);

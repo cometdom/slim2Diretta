@@ -651,6 +651,8 @@ int main(int argc, char* argv[]) {
                 audioThreadDone.store(false, std::memory_order_release);
                 audioTestThread = std::thread([&httpStream, &slimproto, &audioTestRunning, &audioThreadDone, &hasPendingTrack, &pendingMutex, &pendingNextTrack, formatCode, pcmRate, pcmSize, pcmChannels, pcmEndian, direttaPtr, &config]() {
 
+                    bool openFailedInGapless = false;  // Track if open() failed during gapless chaining
+
                     // ============================================================
                     // DSD PATH — separate from PCM/FLAC
                     // ============================================================
@@ -1191,6 +1193,8 @@ int main(int argc, char* argv[]) {
                                 if (!direttaPtr->open(audioFmt)) {
                                     LOG_ERROR("[Audio] Failed to open Diretta output");
                                     slimproto->sendStat(StatEvent::STMn);
+                                    direttaOpened = false;
+                                    openFailedInGapless = true;  // Prevent STMu after loop exit
                                     if (pcmFirstTrack) {
                                         audioThreadDone.store(true, std::memory_order_release);
                                         return;
@@ -1453,7 +1457,9 @@ int main(int argc, char* argv[]) {
                     // Only send STMu (track ended) on natural end, not on forced stop
                     // Sending STMu after strm-q confuses Roon into thinking the
                     // new seek stream has ended, causing it to skip to the next track
-                    if (audioTestRunning.load(std::memory_order_acquire)) {
+                    // Also skip STMu if open() failed during gapless (STMn already sent) —
+                    // otherwise LMS sees STMn+STMu and skips to the next track prematurely
+                    if (audioTestRunning.load(std::memory_order_acquire) && !openFailedInGapless) {
                         slimproto->sendStat(StatEvent::STMu);
                     }
                     audioThreadDone.store(true, std::memory_order_release);
