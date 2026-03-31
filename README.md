@@ -806,4 +806,4 @@ This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) 
 
 **Enjoy native DSD and hi-res PCM streaming from your LMS library!**
 
-*Last updated: 2026-03-22 (v1.2.4)*
+*Last updated: 2026-03-31 (v1.2.4)*
