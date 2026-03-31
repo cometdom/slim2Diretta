@@ -149,7 +149,7 @@ Both backends produce lossless output. The sonic difference is subtle and stems 
 - **DoP auto-detection**: Passthrough as 24-bit PCM to Diretta Target (Roon)
 - **Container parsing**: DSF and DFF headers parsed in-stream
 - **Dynamic conversion**: Planar, bit-reverse, byte-swap as needed by DAC
-- **All rates**: DSD64 (2.8MHz) to DSD1024 (45.2MHz)
+- **All rates**: DSD64 (2.8MHz) to DSD1024 (45.2MHz) only DSD64 DoP with Roon
 
 ### Playback Features
 - **Gapless playback**: Seamless track transitions for PCM/FLAC and DSD (DSF/DFF)
