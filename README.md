@@ -54,7 +54,7 @@ A standalone player that:
 | **Slimproto** | Delegated to Squeezelite | Native implementation |
 | **Dependencies** | Squeezelite + many audio libs | libFLAC + optional codecs |
 | **Format changes** | In-band headers via pipe | Direct internal signaling |
-| **Roon DSD** | DoP via Squeezelite `-D dop` | Automatic DoP detection |
+| **Roon DSD** | DoP via Squeezelite `-D dop` | Automatic DoP detection DSD64 only |
 | **Complexity** | Two processes + patch | Single process, no patch |
 
 Both tools share the same **DirettaSync v2.0** engine for Diretta output.
