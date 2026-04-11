@@ -291,11 +291,19 @@ build_slim2diretta() {
 
     # Configure with CMake
     print_info "Configuring with CMake..."
-    cmake ..
+    CMAKE_ARGS=()
+    if [ -n "$LLVM" ]; then
+        CMAKE_ARGS+=("-DLLVM=$LLVM")
+    fi
+    cmake "${CMAKE_ARGS[@]}" ..
 
     # Build
     print_info "Building slim2diretta..."
-    make -j$(nproc)
+    MAKE_ARGS=("-j$(nproc)")
+    if [[ -n "$VERBOSE" || -n "$V" ]]; then
+        MAKE_ARGS+=("VERBOSE=1")
+    fi
+    make "${MAKE_ARGS[@]}"
 
     # Verify build
     if [ -f "slim2diretta" ]; then

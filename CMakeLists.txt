@@ -1,4 +1,12 @@
 cmake_minimum_required(VERSION 3.10)
+
+# Compiler detection and toolchain settings must be specified before the project() command.
+if(DEFINED LLVM)
+    # Explicitly set both compilers to maintain toolchain parity and prevent LTO mismatches.
+    set(CMAKE_C_COMPILER "clang")
+    set(CMAKE_CXX_COMPILER "clang++")
+endif()
+
 project(slim2diretta VERSION 1.2.5)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -533,6 +541,10 @@ endif()
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -O2")
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
+if(DEFINED LLVM)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -flto")
+endif()
 
 # Architecture-specific SIMD flags
 # TARGET_MARCH allows cross-compilation: cmake -DTARGET_MARCH=v3 ..
