@@ -200,26 +200,26 @@ namespace DirettaRetry {
 
 namespace DirettaBuffer {
     constexpr float DSD_BUFFER_SECONDS = 0.8f;
-    constexpr float PCM_BUFFER_SECONDS = 0.5f;  // Balance: low latency + resilience
+    constexpr float PCM_BUFFER_SECONDS = 3.0f;  // Large buffer to absorb CDN hiccups (Qobuz/Tidal via LMS/Roon)
     constexpr float PCM_HIGHRATE_BUFFER_SECONDS = 6.0f;  // >=176.4kHz: Roon DSD128→DoP cold-start needs margin
     constexpr uint32_t HIGHRATE_THRESHOLD = 176000;       // Sample rate above which we use larger buffers
                                                            // 176000 captures 176.4kHz (DSD64 DoP) and 192kHz
 
     constexpr size_t DSD_PREFILL_MS = 200;
-    constexpr size_t PCM_PREFILL_MS = 50;       // Restored from 30 for stability
+    constexpr size_t PCM_PREFILL_MS = 500;      // Large prefill for CDN resilience
     constexpr size_t PCM_LOWRATE_PREFILL_MS = 100;
 
     // Aligned prefill targets (for whole-buffer alignment)
     // Compressed formats (FLAC, ALAC) have variable decode times - need more buffer
     // Uncompressed formats (WAV, AIFF) have predictable timing - less buffer needed
-    constexpr size_t PREFILL_MS_COMPRESSED = 200;    // FLAC, ALAC
-    constexpr size_t PREFILL_MS_UNCOMPRESSED = 100;  // WAV, AIFF
+    constexpr size_t PREFILL_MS_COMPRESSED = 800;    // FLAC, ALAC — larger for CDN resilience
+    constexpr size_t PREFILL_MS_UNCOMPRESSED = 500;  // WAV, AIFF — larger for CDN resilience
     constexpr size_t PREFILL_MS_DSD = 150;           // DSD (fixed)
     // High sample rates (>=176.4kHz): LMS/Roon deliver at ~1x real-time, need more margin
     constexpr size_t PREFILL_MS_HIGHRATE_COMPRESSED = 1500;
     constexpr size_t PREFILL_MS_HIGHRATE_UNCOMPRESSED = 1000;
 
-    constexpr float REBUFFER_THRESHOLD_PCT = 0.20f;      // Resume playback after 20% buffer refill
+    constexpr float REBUFFER_THRESHOLD_PCT = 0.50f;      // Resume playback after 50% buffer refill (more resilience against CDN hiccups)
     constexpr float REBUFFER_THRESHOLD_PCT_HIGHRATE = 0.50f;  // High-rate streams: 50% for Roon cold-start headroom
 
     constexpr unsigned int DAC_STABILIZATION_MS = 100;
