@@ -144,8 +144,10 @@ The audio thread (in `main.cpp`) handles HTTP reading, decoding, and ring buffer
 - **Flow control**: 1ms sleep when buffer >95% full, loop back to HTTP read to keep TCP pipeline flowing
 - **Decode cache**: Up to 9.2M samples with compaction every 500k consumed samples
 - **Prebuffer**: 500ms normal, 3000ms for ≥176.4kHz
-- **Ring buffer sizing**: 0.5s normal, 6.0s for ≥176.4kHz (PCM_HIGHRATE_BUFFER_SECONDS). HIGHRATE_THRESHOLD = 176000
-- **Adaptive rebuffering**: After underrun, high-rate streams use 50% refill threshold (vs 20% normal) — provides ~4.2s headroom for bursty sources like Roon DSD128→DSD64 downsampling
+- **Ring buffer sizing**: 3.0s normal (PCM_BUFFER_SECONDS, raised from 0.5s in v1.2.5 for CDN resilience), 6.0s for ≥176.4kHz (PCM_HIGHRATE_BUFFER_SECONDS). HIGHRATE_THRESHOLD = 176000
+- **SDK prefill**: 500ms PCM (raised from 50ms in v1.2.5), 800ms compressed / 500ms uncompressed (raised from 200/100ms)
+- **Adaptive rebuffering**: 50% refill threshold after underrun (raised from 20% in v1.2.5) — more resilient recovery when Qobuz/Tidal CDN delivery stalls. High-rate streams use the same 50% threshold for ~4.2s headroom
+- **Drain loop safeguard (v1.2.5)**: Drain loop bails out when the Diretta target is no longer open (auto-released after 5s idle) to prevent 100% CPU spin. Defensive 5ms sleep on `framesWritten==0`
 
 This pattern was aligned with DirettaRendererUPnP's audio engine for consistent delivery characteristics across both projects.
 
