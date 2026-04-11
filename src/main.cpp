@@ -1364,6 +1364,13 @@ int main(int argc, char* argv[]) {
                                 }
                                 break;
                             }
+                            // Bail out if target was released (e.g. inactivity
+                            // auto-release) — sendAudio would return 0 forever,
+                            // turning the drain loop into a 100% CPU spin.
+                            if (!direttaPtr->isOpen()) {
+                                LOG_INFO("[Gapless] Target released during drain, aborting");
+                                break;
+                            }
                             size_t push = std::min(cacheFrames(), MAX_DECODE_FRAMES);
                             size_t written = direttaPtr->sendAudio(
                                 reinterpret_cast<const uint8_t*>(
@@ -1371,7 +1378,11 @@ int main(int argc, char* argv[]) {
                                 push);
                             size_t framesWritten = written /
                                 (sizeof(int32_t) * detectedChannels);
-                            if (framesWritten == 0) continue;
+                            if (framesWritten == 0) {
+                                std::this_thread::sleep_for(
+                                    std::chrono::milliseconds(5));
+                                continue;
+                            }
                             decodeCachePos += framesWritten * detectedChannels;
                             pushedFrames += framesWritten;
 
