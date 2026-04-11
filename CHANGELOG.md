@@ -2,6 +2,22 @@
 
 All notable changes to slim2diretta are documented in this file.
 
+## v1.2.5 (2026-04-11)
+
+### Fixed
+
+- **100% CPU spin in drain loop when target is auto-released**: When the audio thread was draining the decode cache after HTTP EOF and the Diretta target got auto-released (5s inactivity), `sendAudio` returned 0 forever and the drain loop spun at 100% CPU. The audio thread never terminated, blocking subsequent track transitions indefinitely. Fixed with two safeguards: bail out of the drain loop when the target is no longer open, and add a 5ms sleep on `framesWritten==0` as a defensive measure for any other transient zero-write conditions. (Reported by cmr75)
+
+### Changed
+
+- **Larger PCM buffer for CDN resilience**: Multiple users (katywu, Hoorna, Progman, Ikyo) reported intermittent buffer underruns when playing Qobuz streams via LMS or Roon, even for standard CD quality (16/44). Unlike DirettaRendererUPnP, slim2diretta cannot distinguish remote from local streams (both look like local Slimproto streams), so the larger buffer is applied to all PCM playback.
+  - `PCM_BUFFER_SECONDS`: 0.5s → 3.0s (6x larger buffer)
+  - `PCM_PREFILL_MS`: 50ms → 500ms
+  - `PREFILL_MS_COMPRESSED`: 200ms → 800ms
+  - `PREFILL_MS_UNCOMPRESSED`: 100ms → 500ms
+  - `REBUFFER_THRESHOLD_PCT`: 20% → 50% (more resilient recovery after underrun)
+  - Trade-off: ~500ms slower initial track start and longer recovery after CDN hiccups. Acceptable for streaming where latency doesn't matter like it does for local playback.
+
 ## v1.2.4 (2026-03-31)
 
 ### Fixed
