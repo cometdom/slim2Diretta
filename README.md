@@ -414,19 +414,34 @@ sudo systemctl enable --now slim2diretta@1
 
 Two build modes are supported. Advanced users can combine CMake options directly.
 
+### Interactive installer vs direct build
+
+`install.sh` has two usage styles:
+
+```bash
+./install.sh           # Full interactive menu: dependencies, codecs, build,
+                       # systemd service, web UI, network tuning, etc.
+
+./install.sh -b        # Build only — skip the menu, compile directly.
+```
+
+Both styles honor the `LLVM=1` and `VERBOSE=1` environment variables below. Pick whichever suits you: the menu is the easy path for first-time installation, `-b` is the quick rebuild shortcut once everything else is already installed.
+
 ### Default build (gcc)
 
 ```bash
-./install.sh -b
-# or: mkdir build && cd build && cmake .. && make -j$(nproc)
+./install.sh           # interactive menu -> option 2 (Build only)
+./install.sh -b        # or direct build
+# or manually: mkdir build && cd build && cmake .. && make -j$(nproc)
 ```
 
 ### clang + LTO + lld (recommended for audio quality)
 
-Multiple testers report a clearly better sound with clang+LTO builds compared to gcc. Enable it with a single environment variable:
+Multiple testers report a clearly better sound with clang+LTO builds compared to gcc. Enable it with a single environment variable — works with either usage style:
 
 ```bash
-env LLVM=1 ./install.sh -b
+env LLVM=1 ./install.sh       # interactive menu, clang+LTO+lld when you build
+env LLVM=1 ./install.sh -b    # direct build, clang+LTO+lld
 # or directly with cmake:
 LLVM=1 cmake .. && make -j$(nproc)
 ```
@@ -444,7 +459,8 @@ The `LLVM=1` shortcut mirrors the convention used by the Linux kernel and Dirett
 Useful for debugging build failures — shows the full compiler command lines:
 
 ```bash
-env VERBOSE=1 ./install.sh -b
+env VERBOSE=1 ./install.sh       # interactive menu + verbose when building
+env VERBOSE=1 ./install.sh -b    # direct build + verbose
 # combinable with LLVM=1:
 env LLVM=1 VERBOSE=1 ./install.sh -b
 ```
