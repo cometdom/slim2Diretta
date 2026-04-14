@@ -64,6 +64,30 @@
             ]
         },
         {
+            "name": "CPU Affinity",
+            "collapsed": true,
+            "settings": [
+                {
+                    "key": "cpu-audio",
+                    "type": "number",
+                    "cli_arg": "--cpu-audio",
+                    "label": "Audio Core",
+                    "description": "Pin SDK worker + Diretta hot path to this CPU core. Empty = no pinning.",
+                    "default": "",
+                    "min": 0
+                },
+                {
+                    "key": "cpu-other",
+                    "type": "number",
+                    "cli_arg": "--cpu-other",
+                    "label": "Other Core",
+                    "description": "Pin audio/decode/slimproto threads to this CPU core. Empty = no pinning.",
+                    "default": "",
+                    "min": 0
+                }
+            ]
+        },
+        {
             "name": "Process Priority",
             "collapsed": true,
             "config_type": "shell_vars",

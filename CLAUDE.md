@@ -24,6 +24,9 @@ cmake -DARCH_NAME=aarch64-linux-15k16 ..  # Raspberry Pi 5 (16KB pages)
 # Custom SDK path
 export DIRETTA_SDK_PATH=/path/to/DirettaHostSDK_148
 cmake ..
+
+# Clang + LTO (recommended for best audio quality)
+CC=clang CXX=clang++ cmake -DENABLE_LTO=ON ..
 ```
 
 ## Running
@@ -37,6 +40,9 @@ sudo ./slim2diretta -s <lms-ip> --target 1
 
 # With player name and verbose
 sudo ./slim2diretta -s <lms-ip> --target 1 -n "Living Room" -v
+
+# With CPU affinity (cores 2 and 3 isolated via isolcpus=2,3)
+sudo ./slim2diretta --target 1 --cpu-audio 2 --cpu-other 3
 ```
 
 ## Architecture
@@ -53,6 +59,8 @@ LMS (network)
 ```
 
 **Threading**: main (init/signals) + slimproto (TCP LMS) + audio (HTTP->decode->push) + SDK worker (DirettaSync internal)
+
+**CPU affinity** (`--cpu-audio`, `--cpu-other`): optional thread pinning via `pthread_setaffinity_np`, default `-1` (no pinning). `--cpu-audio` pins the SDK worker thread and is also passed to `DIRETTA::Sync::open(cpuMain, cpuOther, ...)`; the `OCCUPIED` flag (bit 16) is added to threadMode automatically when `cpuAudio >= 0`. `--cpu-other` pins the audio (HTTP→decode→push) and Slimproto receive threads. Both are exposed via CLI and Web UI (CPU Affinity group). Aligned with DirettaRendererUPnP.
 
 **Startup**: Both Diretta target discovery and LMS autodiscovery retry indefinitely:
 - `discoverTarget()` retries every 2s (log every 5s) until found or cancelled. Pass `std::atomic<bool>* stopSignal` to `enable()` to activate retry mode.

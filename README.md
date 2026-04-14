@@ -1,4 +1,4 @@
-# slim2diretta v1.2.5
+# slim2diretta v1.2.6
 
 **Native LMS Player with Diretta Output - Mono-Process Architecture**
 
@@ -8,7 +8,7 @@
 
 ---
 
-![Version](https://img.shields.io/badge/version-1.2.5-blue.svg)
+![Version](https://img.shields.io/badge/version-1.2.6-blue.svg)
 ![DSD](https://img.shields.io/badge/DSD-Native-green.svg)
 ![SDK](https://img.shields.io/badge/SDK-DIRETTA::Sync-orange.svg)
 
@@ -413,6 +413,13 @@ cmake -DARCH_NAME=x64-linux-15v3 ..       # x64 with AVX2
 cmake -DARCH_NAME=aarch64-linux-15k16 ..  # Raspberry Pi 5
 ```
 
+**Optional: Build with clang + LTO** (typically the preferred build for audio quality):
+```bash
+CC=clang CXX=clang++ cmake -DENABLE_LTO=ON ..
+make -j$(nproc)
+```
+The interactive installer (`./install.sh`) automatically offers this option when `clang` is detected on the system.
+
 #### 4. Find Your Diretta Target
 
 ```bash
@@ -505,7 +512,25 @@ Diretta Advanced Options:
   --target-profile-limit <us>    Target profile limit (0=self, default: 200)
   --thread-mode <bitmask>        SDK thread mode bitmask (default: 1)
   --mtu <bytes>                  MTU size (default: auto-detect)
+
+CPU Affinity (optional):
+  --cpu-audio <core>             Pin SDK worker + Diretta hot path to this core
+  --cpu-other <core>             Pin audio/decode/slimproto threads to this core
 ```
+
+### CPU Affinity (Thread Pinning)
+
+`--cpu-audio` and `--cpu-other` pin specific threads to dedicated CPU cores to reduce jitter and improve real-time performance. This is particularly beneficial on systems with CPU isolation (`isolcpus` kernel parameter).
+
+- `--cpu-audio <core>`: pins the Diretta SDK worker thread (the hot path that sends packets to the target) to the specified core. Automatically enables the SDK `OCCUPIED` thread mode flag (bit 16).
+- `--cpu-other <core>`: pins the audio/decode thread (HTTP reader + decoder + ring buffer push) and the Slimproto TCP receive thread to the specified core.
+
+**Example**: on an 8-core system with cores 2 and 3 isolated via `isolcpus=2,3`:
+```bash
+sudo slim2diretta --target 1 --cpu-audio 2 --cpu-other 3
+```
+
+Both options also accept the value via the Web UI (CPU Affinity section).
 
 ### Configuration File (/etc/default/slim2diretta)
 

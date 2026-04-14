@@ -2,6 +2,26 @@
 
 All notable changes to slim2diretta are documented in this file.
 
+## v1.2.6 (unreleased)
+
+### Added
+
+- **Resilient Diretta target discovery at startup**: Instead of exiting when the target is not found, the player now retries every 2s and logs every 5s until the target becomes available (or the process is cancelled with Ctrl+C). Makes the player robust to targets that start later, are temporarily unavailable, or are restarted — especially important on systems without systemd auto-restart (e.g., GentooPlayer with OpenRC). (Suggested by Filippo, GentooPlayer)
+
+- **Clang + LTO build option**: New `ENABLE_LTO` CMake option enables `-flto` on compile and link flags. Recommended combination for best audio quality:
+  ```bash
+  CC=clang CXX=clang++ cmake -DENABLE_LTO=ON ..
+  ```
+  The interactive installer (`./install.sh`) automatically detects clang and offers this option at build time. Mirrors the `make LLVM=1` switch in DirettaRendererUPnP.
+
+- **CPU affinity (thread pinning)**: Two new CLI options and Web UI fields pin critical threads to specific cores, reducing jitter on systems with CPU isolation.
+  - `--cpu-audio <core>`: pins the Diretta SDK worker thread (hot path). Automatically adds the `OCCUPIED` flag (bit 16) to the SDK thread mode and also pins the worker manually via `pthread_setaffinity_np` (belt-and-suspenders, because SDK pinning doesn't always work — e.g., on RPi 4).
+  - `--cpu-other <core>`: pins the audio/decode thread (HTTP reader + decoder + ring buffer push) and the Slimproto TCP receive thread.
+  - Exposed in the Web UI under a new "CPU Affinity" section.
+  - Default: no pinning (-1). Aligns with the existing implementation in DirettaRendererUPnP.
+
+- **Graceful fallback when DAC doesn't support native DSD**: Previously slim2diretta crashed with an unhandled exception when the Diretta target reported no DSD support. It now logs an error and skips the track instead of crashing. Users should configure LMS/Roon to send DoP (DSD over PCM) when native DSD is unavailable. (Reported by lalekuku)
+
 ## v1.2.5 (2026-04-11)
 
 ### Fixed

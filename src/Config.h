@@ -27,6 +27,10 @@ struct Config {
     unsigned int cycleMinTime = 0;      // Min cycle for RANDOM mode (0 = unused)
     unsigned int targetProfileLimitTime = 0;   // 0=SelfProfile (stable), >0=TargetProfile(µs)
 
+    // CPU affinity (-1 = no pinning)
+    int cpuAudio = -1;                  // Core for SDK worker + Diretta hot path
+    int cpuOther = -1;                  // Core for audio/decode/slimproto threads
+
     // Audio
     int maxSampleRate = 1536000;
     bool dsdEnabled = true;
