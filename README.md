@@ -413,12 +413,26 @@ cmake -DARCH_NAME=x64-linux-15v3 ..       # x64 with AVX2
 cmake -DARCH_NAME=aarch64-linux-15k16 ..  # Raspberry Pi 5
 ```
 
-**Optional: Build with clang + LTO** (typically the preferred build for audio quality):
+**Optional: Build with clang + LTO** (typically the preferred build for audio quality — multiple testers confirm a clearly better sound):
+
 ```bash
-CC=clang CXX=clang++ cmake -DENABLE_LTO=ON ..
+# Single-switch shortcut (clang + LTO + lld linker):
+env LLVM=1 ./install.sh -b
+# or directly with cmake:
+LLVM=1 cmake ..
+make -j$(nproc)
+
+# Manual CMake flags:
+CC=clang CXX=clang++ cmake -DENABLE_LTO=ON -DUSE_LLD=ON ..
 make -j$(nproc)
 ```
-The interactive installer (`./install.sh`) automatically offers this option when `clang` is detected on the system.
+
+The `LLVM=1` shortcut mirrors the convention used by the Linux kernel and DirettaRendererUPnP. It forces `clang`/`clang++`, enables LTO, and uses the `lld` linker. The interactive installer (`./install.sh`) also auto-detects clang and offers this option at build time.
+
+**Verbose build output** (useful for debugging): set `VERBOSE=1` or `V=1`:
+```bash
+env VERBOSE=1 ./install.sh -b
+```
 
 #### 4. Find Your Diretta Target
 

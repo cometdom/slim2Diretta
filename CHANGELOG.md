@@ -8,11 +8,21 @@ All notable changes to slim2diretta are documented in this file.
 
 - **Resilient Diretta target discovery at startup**: Instead of exiting when the target is not found, the player now retries every 2s and logs every 5s until the target becomes available (or the process is cancelled with Ctrl+C). Makes the player robust to targets that start later, are temporarily unavailable, or are restarted — especially important on systems without systemd auto-restart (e.g., GentooPlayer with OpenRC). (Suggested by Filippo, GentooPlayer)
 
-- **Clang + LTO build option**: New `ENABLE_LTO` CMake option enables `-flto` on compile and link flags. Recommended combination for best audio quality:
+- **Clang + LTO build option**: New `ENABLE_LTO` CMake option enables `-flto` on compile and link flags. Recommended combination for best audio quality — multiple testers report a clearly preferable sound with clang+LTO builds. Three ways to enable:
   ```bash
-  CC=clang CXX=clang++ cmake -DENABLE_LTO=ON ..
+  # Single-switch shortcut (clang + LTO + lld linker):
+  env LLVM=1 ./install.sh -b
+  #   or: LLVM=1 cmake ..
+
+  # Manual CMake flags:
+  CC=clang CXX=clang++ cmake -DENABLE_LTO=ON -DUSE_LLD=ON ..
+
+  # Interactive prompt (auto-detects clang):
+  ./install.sh
   ```
-  The interactive installer (`./install.sh`) automatically detects clang and offers this option at build time. Mirrors the `make LLVM=1` switch in DirettaRendererUPnP.
+  The `LLVM=1` shortcut mirrors the convention used by the Linux kernel and DirettaRendererUPnP's Makefile. It automatically sets `CC=clang`, `CXX=clang++`, enables LTO, and uses the `lld` linker via `-fuse-ld=lld`. (Inspired by PR #8 from sheviks)
+
+- **Verbose build output**: Set `VERBOSE=1` or `V=1` to make `install.sh` pass `VERBOSE=1` to make, showing the full compiler command lines. Useful for debugging build issues. (Inspired by PR #8 from sheviks)
 
 - **CPU affinity (thread pinning)**: Two new CLI options and Web UI fields pin critical threads to specific cores, reducing jitter on systems with CPU isolation.
   - `--cpu-audio <core>`: pins the Diretta SDK worker thread (hot path). Automatically adds the `OCCUPIED` flag (bit 16) to the SDK thread mode and also pins the worker manually via `pthread_setaffinity_np` (belt-and-suspenders, because SDK pinning doesn't always work — e.g., on RPi 4).

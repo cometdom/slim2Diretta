@@ -1,4 +1,20 @@
 cmake_minimum_required(VERSION 3.10)
+
+# ============================================
+# LLVM=1 shortcut: clang + LTO + lld linker
+# ============================================
+# Mirrors the LLVM=1 convention used by the Linux kernel and
+# DirettaRendererUPnP's Makefile. Must be set BEFORE project() so that
+# CMake picks up the compiler override.
+# Usage: env LLVM=1 ./install.sh -b   or   LLVM=1 cmake ..
+if(DEFINED ENV{LLVM} OR DEFINED LLVM)
+    set(CMAKE_C_COMPILER   "clang"   CACHE STRING "C compiler")
+    set(CMAKE_CXX_COMPILER "clang++" CACHE STRING "C++ compiler")
+    # Auto-enable LTO when LLVM shortcut is used
+    set(ENABLE_LTO ON CACHE BOOL "Enable Link-Time Optimization" FORCE)
+    set(USE_LLD    ON CACHE BOOL "Use lld linker with clang"     FORCE)
+endif()
+
 project(slim2diretta VERSION 1.2.6)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -540,7 +556,10 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 # Enable with: cmake -DENABLE_LTO=ON ..
 # Recommended with clang for best results:
 #   CC=clang CXX=clang++ cmake -DENABLE_LTO=ON ..
+# Single-switch shortcut (clang + LTO + lld):
+#   LLVM=1 cmake ..   or   env LLVM=1 ./install.sh -b
 option(ENABLE_LTO "Enable Link-Time Optimization (-flto)" OFF)
+option(USE_LLD    "Use lld linker (clang only, faster + LTO-friendly)" OFF)
 if(ENABLE_LTO)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -flto")
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -flto")
@@ -548,6 +567,10 @@ if(ENABLE_LTO)
     message(STATUS "LTO: ENABLED (${CMAKE_CXX_COMPILER_ID})")
 else()
     message(STATUS "LTO: DISABLED (enable with -DENABLE_LTO=ON)")
+endif()
+if(USE_LLD)
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fuse-ld=lld")
+    message(STATUS "Linker: lld (-fuse-ld=lld)")
 endif()
 
 # Architecture-specific SIMD flags

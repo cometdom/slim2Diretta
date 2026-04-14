@@ -287,18 +287,29 @@ build_slim2diretta() {
     # Resolve SDK path before cd build (relative paths break after cd)
     export DIRETTA_SDK_PATH="$(realpath "$SDK_PATH")"
 
-    # Optional: offer clang + LTO if clang is installed
     local cmake_env=""
     local cmake_opts=""
-    if command -v clang++ >/dev/null 2>&1 && command -v clang >/dev/null 2>&1; then
+
+    # Environment variable shortcut: LLVM=1 -> clang + LTO + lld
+    # (matches DirettaRendererUPnP Makefile convention, non-interactive)
+    if [ -n "$LLVM" ]; then
+        if command -v clang++ >/dev/null 2>&1 && command -v clang >/dev/null 2>&1; then
+            cmake_opts="-DLLVM=1"
+            print_info "LLVM=1 detected: building with clang + LTO + lld"
+        else
+            print_error "LLVM=1 set but clang/clang++ not installed"
+            exit 1
+        fi
+    elif command -v clang++ >/dev/null 2>&1 && command -v clang >/dev/null 2>&1; then
+        # Interactive: offer clang + LTO if clang is installed
         echo ""
         echo "clang detected — clang + LTO produces a more optimized binary"
         echo "(typically the preferred build for audio quality)."
         read -p "Build with clang + LTO? [y/N]: " use_clang_lto
         if [[ "$use_clang_lto" =~ ^[Yy]$ ]]; then
             cmake_env="CC=clang CXX=clang++"
-            cmake_opts="-DENABLE_LTO=ON"
-            print_info "Using clang + LTO"
+            cmake_opts="-DENABLE_LTO=ON -DUSE_LLD=ON"
+            print_info "Using clang + LTO + lld"
         else
             print_info "Using default compiler (gcc)"
         fi
@@ -311,12 +322,17 @@ build_slim2diretta() {
     if [ -n "$cmake_env" ]; then
         env $cmake_env cmake $cmake_opts ..
     else
-        cmake ..
+        cmake $cmake_opts ..
     fi
 
-    # Build
+    # Build (verbose if VERBOSE=1 or V=1 is set)
     print_info "Building slim2diretta..."
-    make -j$(nproc)
+    local make_args=("-j$(nproc)")
+    if [[ -n "$VERBOSE" || -n "$V" ]]; then
+        make_args+=("VERBOSE=1")
+        print_info "Verbose build enabled"
+    fi
+    make "${make_args[@]}"
 
     # Verify build
     if [ -f "slim2diretta" ]; then
