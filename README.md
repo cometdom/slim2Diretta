@@ -127,50 +127,42 @@ Both tools share the same **DirettaSync v2.0** engine for Diretta output.
 
 ## Features
 
-### Audio Formats
-- **FLAC**: Lossless decoding via libFLAC (all bit depths)
-- **MP3**: Decoding via libmpg123 (internet radio, streaming)
-- **AAC**: Decoding via fdk-aac with HE-AAC v2 / SBR / PS support (internet radio)
-- **Ogg Vorbis**: Decoding via libvorbisfile (internet radio, streaming)
-- **PCM**: WAV, AIFF containers + raw PCM (Roon)
-- **Native DSD**: DSF (LSB-first) and DFF/DSDIFF (MSB-first)
-- **DSD rates**: DSD64, DSD128, DSD256, DSD512, DSD1024
-- **DoP**: Automatic detection and passthrough as 24-bit PCM (Roon compatibility). The Diretta Target handles DoP marker detection and forwarding to the DAC
-- **Bit-perfect**: Volume forced to 100%, no processing
+### Audio Formats and Decoders
 
-### Decoder Backends
-- **Native** (default): Dedicated libraries (libFLAC, libmpg123, libvorbis, fdk-aac) — brighter, more detailed sound
-- **FFmpeg** (`--decoder ffmpeg`): Unified decoder via libavcodec — warmer, wider soundstage
+- **PCM**: WAV, AIFF, and raw PCM (Roon), up to **1536 kHz / 32-bit**
+- **FLAC**: lossless via libFLAC, all bit depths
+- **MP3 / AAC / Ogg Vorbis**: optional, for internet radio (libmpg123, fdk-aac, libvorbisfile)
+- **Native DSD**: DSF (LSB-first), DFF/DSDIFF (MSB-first), **DSD64 to DSD1024**
+- **DoP (DSD over PCM)**: auto-detected and passed through as 24-bit PCM to the Diretta Target, which forwards DoP markers to the DAC (Roon compatibility, DSD64 only)
+- **Bit-perfect**: volume forced to 100%, no resampling, no processing
 
-Both backends produce lossless output. The sonic difference is subtle and stems from internal processing patterns. Switch between them to find your preference.
+Two decoder backends are available and can be switched at runtime:
 
-### DSD Handling
-- **Native DSD streaming**: Direct DSD bitstream from LMS (format code `d`)
-- **DoP auto-detection**: Passthrough as 24-bit PCM to Diretta Target (Roon)
-- **Container parsing**: DSF and DFF headers parsed in-stream
-- **Dynamic conversion**: Planar, bit-reverse, byte-swap as needed by DAC
-- **All rates**: DSD64 (2.8MHz) to DSD1024 (45.2MHz) only DSD64 DoP with Roon
+| Backend | Option | Character |
+|---|---|---|
+| **Native** (default) | — | libFLAC / libmpg123 / libvorbis / fdk-aac — brighter, more detailed |
+| **FFmpeg** | `--decoder ffmpeg` | libavcodec unified decoder — warmer, wider soundstage |
 
-### Playback Features
-- **Gapless playback**: Seamless track transitions for PCM/FLAC and DSD (DSF/DFF)
-- **Seek support**: In-track seeking via LMS progress bar (FLAC, DSD)
+Both produce lossless output; the sonic difference is subtle and comes from internal processing patterns.
+
+### Playback and Streaming
+
+- **Gapless playback** for PCM, FLAC, and DSD
+- **Seek support** via the LMS progress bar (FLAC, DSD)
+- **Resilient startup**: both Diretta target discovery and LMS auto-discovery retry indefinitely with periodic status logging
+- **Auto-release**: Diretta target released after 5 s idle so other Diretta hosts can coexist
+- **Quick resume**: same-format track transitions skip the full Diretta reconnection
+- **Multi-instance**: template systemd service for multiple Diretta targets
 
 ### Low-Latency Architecture
-- **DirettaSync v2.0**: Shared with squeeze2diretta and DirettaRendererUPnP
-- **Lock-free ring buffers**: SPSC design with SIMD optimizations (AVX2/NEON)
-- **Optimized audio delivery**: 2048-frame push chunks with event-based flow control and adaptive throttle (aligned with DirettaRendererUPnP)
-- **Adaptive prebuffer**: 500ms (normal) / 1500ms (>192kHz) with flow control
-- **Quick resume**: Same-format track transitions without full reconnection
-- **Clean transitions**: Silence injection on pause/stop/format changes
-- **Auto-release**: Diretta target released after 5s idle for coexistence with other Diretta hosts
-- **Resilient startup**: Retries both Diretta target discovery and LMS server auto-discovery indefinitely if not yet available, with periodic status logging
-- **Advanced tuning**: Transfer mode, info cycle, target profile, and thread priority options
 
-### Slimproto Protocol
-- **Clean-room implementation**: From public documentation (no GPL code copied)
-- **LMS auto-discovery**: UDP broadcast on port 3483
-- **Roon compatible**: Squeezebox mode with DoP support
-- **Multi-instance**: Template systemd service for multiple Diretta targets
+- **DirettaSync v2.0** shared with squeeze2diretta and DirettaRendererUPnP
+- **Lock-free SPSC ring buffers** with AVX2 / NEON SIMD optimizations
+- **Adaptive prebuffer**: 500 ms (standard) / 3000 ms (≥ 176 kHz)
+- **Multi-chunk push** (2048-frame chunks) at high sample rates, event-based flow control
+- **Clean-room Slimproto** implementation from public documentation — no GPL code copied
+- **Roon compatibility** via Slimproto/Squeezebox mode with DoP passthrough
+- **Optional CPU affinity** (`--cpu-audio`, `--cpu-other`) and clang+LTO build for minimum jitter
 
 ---
 
@@ -211,60 +203,7 @@ Both backends produce lossless output. The sonic difference is subtle and stems 
 
 ## Upgrading
 
-### From v1.2.0 to v1.2.1
-
-```bash
-# 1. Stop the service
-sudo systemctl stop slim2diretta@1
-
-# 2. Pull and rebuild
-cd ~/slim2diretta
-git pull
-cd build && make -j$(nproc)
-
-# 3. Update the installed binary
-sudo cp slim2diretta /usr/local/bin/
-# Or: ./install.sh --update
-
-# 4. Restart the service
-sudo systemctl start slim2diretta@1
-```
-
-> **What's new in v1.2.1:** Bug fixes for FFmpeg decoder — 24-bit DACs with 32-bit-limited hardware now receive the correct 24-bit Diretta connection, 32-bit WAV files play correctly via FFmpeg, and LMS auto-discovery now retries indefinitely instead of exiting when LMS is temporarily offline.
-
-### From v1.1.x to v1.2.0
-
-```bash
-# 1. Stop the service
-sudo systemctl stop slim2diretta@1
-
-# 2. Install FFmpeg development libraries (optional, for FFmpeg backend)
-./install.sh --codecs
-# Or manually:
-#   Fedora:  sudo dnf install ffmpeg-free-devel
-#   Ubuntu:  sudo apt install libavcodec-dev libavutil-dev
-#   Arch:    sudo pacman -S ffmpeg
-
-# 3. Pull the latest version
-cd ~/slim2diretta
-git pull
-
-# 4. Rebuild (re-run cmake to detect new libraries)
-cd build
-cmake ..
-make -j$(nproc)
-
-# 5. Update the installed binary
-sudo cp slim2diretta /usr/local/bin/
-# Or use: ./install.sh --update
-
-# 6. Restart the service
-sudo systemctl start slim2diretta@1
-```
-
-> **What's new in v1.2.0:** FFmpeg decoder backend (`--decoder ffmpeg`) as an alternative to the native decoders. Users report a warmer, more enveloping sound with FFmpeg compared to the brighter native backend. Switch via CLI or Web UI. Also includes all v1.1.1 fixes (Roon seek, high sample rate buffers, FLAC log spam).
-
-### From v1.0.0 to v1.1.0
+Generic upgrade procedure from any previous version:
 
 ```bash
 # 1. Stop the service
@@ -274,17 +213,15 @@ sudo systemctl stop slim2diretta@1
 cd ~/slim2diretta
 git pull
 
-# 3. Rebuild and update the binary
+# 3. Rebuild and install (picks up any new dependencies)
 ./install.sh --update
+# or manually: cd build && cmake .. && make -j$(nproc) && sudo cp slim2diretta /usr/local/bin/
 
-# 4. Install the web configuration UI (new in v1.1.0)
-./install.sh --webui
-
-# 5. Restart the service
+# 4. Restart the service
 sudo systemctl start slim2diretta@1
 ```
 
-> **What's new in v1.1.0:** Gapless playback (FLAC + DSD), seek support, and Web Configuration UI — configure slim2diretta from your browser at `http://<ip>:8081` instead of editing `/etc/default/slim2diretta` manually. See [Web Configuration UI](#web-configuration-ui) for details.
+If a new release introduces a new optional dependency (e.g. a new codec or the FFmpeg backend), install it first with `./install.sh --codecs`. See [CHANGELOG.md](CHANGELOG.md) for per-version details and any migration notes.
 
 ---
 
@@ -407,32 +344,7 @@ cmake ..
 make -j$(nproc)
 ```
 
-**Architecture override** (if auto-detection fails):
-```bash
-cmake -DARCH_NAME=x64-linux-15v3 ..       # x64 with AVX2
-cmake -DARCH_NAME=aarch64-linux-15k16 ..  # Raspberry Pi 5
-```
-
-**Optional: Build with clang + LTO** (typically the preferred build for audio quality — multiple testers confirm a clearly better sound):
-
-```bash
-# Single-switch shortcut (clang + LTO + lld linker):
-env LLVM=1 ./install.sh -b
-# or directly with cmake:
-LLVM=1 cmake ..
-make -j$(nproc)
-
-# Manual CMake flags:
-CC=clang CXX=clang++ cmake -DENABLE_LTO=ON -DUSE_LLD=ON ..
-make -j$(nproc)
-```
-
-The `LLVM=1` shortcut mirrors the convention used by the Linux kernel and DirettaRendererUPnP. It forces `clang`/`clang++`, enables LTO, and uses the `lld` linker. The interactive installer (`./install.sh`) also auto-detects clang and offers this option at build time.
-
-**Verbose build output** (useful for debugging): set `VERBOSE=1` or `V=1`:
-```bash
-env VERBOSE=1 ./install.sh -b
-```
+See [Build Options](#build-options) below for clang+LTO, architecture overrides, verbose output, and individual codec toggles.
 
 #### 4. Find Your Diretta Target
 
@@ -495,6 +407,85 @@ sudo systemctl enable --now slim2diretta@1
 > Configure fixed volume:
 > - **LMS**: Settings -> Player -> Audio -> Volume Control -> "Fixed at 100%"
 > - **Roon**: Device Setup -> Volume Control -> "Fixed Volume"
+
+---
+
+## Build Options
+
+Two build modes are supported. Advanced users can combine CMake options directly.
+
+### Default build (gcc)
+
+```bash
+./install.sh -b
+# or: mkdir build && cd build && cmake .. && make -j$(nproc)
+```
+
+### clang + LTO + lld (recommended for audio quality)
+
+Multiple testers report a clearly better sound with clang+LTO builds compared to gcc. Enable it with a single environment variable:
+
+```bash
+env LLVM=1 ./install.sh -b
+# or directly with cmake:
+LLVM=1 cmake .. && make -j$(nproc)
+```
+
+The `LLVM=1` shortcut mirrors the convention used by the Linux kernel and DirettaRendererUPnP. It forces `clang`/`clang++`, enables `-flto`, and uses the `lld` linker. Requires `clang`, `clang++`, and `lld` to be installed:
+
+| Distribution | Command |
+|---|---|
+| **Fedora** | `sudo dnf install clang lld` |
+| **Ubuntu/Debian** | `sudo apt install clang lld` |
+| **Arch** | `sudo pacman -S clang lld` |
+
+### Verbose build output
+
+Useful for debugging build failures — shows the full compiler command lines:
+
+```bash
+env VERBOSE=1 ./install.sh -b
+# combinable with LLVM=1:
+env LLVM=1 VERBOSE=1 ./install.sh -b
+```
+
+`V=1` is accepted as a synonym for `VERBOSE=1`.
+
+### Advanced CMake options
+
+Invoke `cmake` directly for fine-grained control:
+
+```bash
+# Architecture override (if auto-detection fails)
+cmake -DARCH_NAME=x64-linux-15v3 ..       # x64 with AVX2
+cmake -DARCH_NAME=aarch64-linux-15k16 ..  # Raspberry Pi 5 / 16KB pages
+
+# LTO and linker (what LLVM=1 does under the hood)
+CC=clang CXX=clang++ cmake -DENABLE_LTO=ON -DUSE_LLD=ON ..
+
+# Disable individual codecs
+cmake -DENABLE_MP3=OFF ..
+cmake -DENABLE_OGG=OFF ..
+cmake -DENABLE_AAC=OFF ..
+cmake -DENABLE_FFMPEG=OFF ..   # Disable FFmpeg backend
+```
+
+CMake reports the active codecs and options at the end of the configure step:
+
+```
+-- Codecs:
+--   FLAC:           ENABLED (always)
+--   PCM:            ENABLED (always)
+--   MP3:            ENABLED (libmpg123)
+--   Ogg Vorbis:     ENABLED (libvorbisfile)
+--   AAC:            ENABLED (fdk-aac)
+-- Backends:
+--   FFmpeg:         ENABLED (--decoder ffmpeg)
+-- Build:
+--   Compiler:       /usr/bin/clang++
+--   LTO:            ENABLED
+--   Target:         slim2diretta
+```
 
 ---
 
@@ -685,31 +676,7 @@ sudo journalctl -u slim2diretta@1 -n 20
 
 ## Internet Radio Support
 
-slim2diretta supports internet radio playback via the following codecs:
-
-| Codec | Library | License | Status |
-|-------|---------|---------|--------|
-| **MP3** | libmpg123 | LGPL-2.1 | Optional (auto-detected) |
-| **AAC** | fdk-aac | BSD-like | Optional (auto-detected) |
-| **Ogg Vorbis** | libvorbisfile | BSD-3-Clause | Optional (auto-detected) |
-
-All codecs include **error recovery** for robust radio streaming (automatic resync on corrupted frames, gap handling).
-
-CMake reports the codec and backend status during build:
-```
--- Codecs:
---   FLAC:           ENABLED (always)
---   PCM:            ENABLED (always)
---   MP3:            ENABLED (libmpg123)
---   Ogg Vorbis:     ENABLED (libvorbisfile)
---   AAC:            ENABLED (fdk-aac)
---
--- Backends:
---   FFmpeg:         ENABLED (--decoder ffmpeg)
-```
-
-To disable a specific codec: `cmake -DENABLE_MP3=OFF ..`
-To disable FFmpeg backend: `cmake -DENABLE_FFMPEG=OFF ..`
+slim2diretta supports internet radio via the optional MP3, AAC, and Ogg Vorbis codecs (libmpg123, fdk-aac, libvorbisfile). All three include automatic resync on corrupted frames and gap handling for robust streaming. Install them before running `cmake` so they're picked up — see [Build Options](#build-options) for how to toggle them individually.
 
 ---
 
