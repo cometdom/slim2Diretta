@@ -32,8 +32,10 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <poll.h>
+#include <pthread.h>
+#include <sched.h>
 
-#define SLIM2DIRETTA_VERSION "1.2.5"
+#define SLIM2DIRETTA_VERSION "1.2.6"
 
 // ============================================
 // Async Logging Infrastructure
@@ -241,6 +243,26 @@ Config parseArguments(int argc, char* argv[]) {
                 exit(1);
             }
         }
+        else if (arg == "--cpu-audio" && i + 1 < argc) {
+            config.cpuAudio = std::atoi(argv[++i]);
+            int numCores = static_cast<int>(std::thread::hardware_concurrency());
+            if (config.cpuAudio < 0 || config.cpuAudio >= numCores) {
+                std::cerr << "Warning: --cpu-audio " << config.cpuAudio
+                          << " out of range [0," << (numCores - 1)
+                          << "], ignoring" << std::endl;
+                config.cpuAudio = -1;
+            }
+        }
+        else if (arg == "--cpu-other" && i + 1 < argc) {
+            config.cpuOther = std::atoi(argv[++i]);
+            int numCores = static_cast<int>(std::thread::hardware_concurrency());
+            if (config.cpuOther < 0 || config.cpuOther >= numCores) {
+                std::cerr << "Warning: --cpu-other " << config.cpuOther
+                          << " out of range [0," << (numCores - 1)
+                          << "], ignoring" << std::endl;
+                config.cpuOther = -1;
+            }
+        }
         else if (arg == "--list-targets" || arg == "-l") {
             config.listTargets = true;
         }
@@ -278,6 +300,10 @@ Config parseArguments(int argc, char* argv[]) {
                       << "                             8192=NoJumboFrame, 16384=NoFirewall, 32768=NoRawSocket\n"
                       << "  --mtu <bytes>              MTU override (default: auto)\n"
                       << "  --rt-priority <1-99>       SCHED_FIFO real-time priority for worker thread (default: 50)\n"
+                      << "\n"
+                      << "CPU Affinity (optional, -1 = no pinning):\n"
+                      << "  --cpu-audio <core>         Pin SDK worker + Diretta hot path to this core\n"
+                      << "  --cpu-other <core>         Pin audio/decode/slimproto threads to this core\n"
                       << "\n"
                       << "Audio:\n"
                       << "  --max-rate <hz>        Max sample rate (default: 1536000)\n"
@@ -490,6 +516,8 @@ int main(int argc, char* argv[]) {
     direttaConfig.infoCycle = config.infoCycle;
     direttaConfig.cycleMinTime = config.cycleMinTime;
     direttaConfig.targetProfileLimitTime = config.targetProfileLimitTime;
+    direttaConfig.cpuAudio = config.cpuAudio;
+    direttaConfig.cpuOther = config.cpuOther;
     if (!config.transferMode.empty()) {
         if (config.transferMode == "varmax")
             direttaConfig.transferMode = DirettaTransferMode::VAR_MAX;
@@ -650,6 +678,17 @@ int main(int argc, char* argv[]) {
                 audioTestRunning.store(true);
                 audioThreadDone.store(false, std::memory_order_release);
                 audioTestThread = std::thread([&httpStream, &slimproto, &audioTestRunning, &audioThreadDone, &hasPendingTrack, &pendingMutex, &pendingNextTrack, formatCode, pcmRate, pcmSize, pcmChannels, pcmEndian, direttaPtr, &config]() {
+
+                    // Pin audio/decode thread to cpuOther core if configured
+                    if (config.cpuOther >= 0) {
+                        cpu_set_t cpuset;
+                        CPU_ZERO(&cpuset);
+                        CPU_SET(config.cpuOther, &cpuset);
+                        if (pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset) == 0) {
+                            std::cout << "[Audio] Thread pinned to CPU core "
+                                      << config.cpuOther << std::endl;
+                        }
+                    }
 
                     bool openFailedInGapless = false;  // Track if open() failed during gapless chaining
 
@@ -1595,7 +1634,16 @@ int main(int argc, char* argv[]) {
         connectionCount++;
 
         // Run slimproto receive loop in a dedicated thread
-        std::thread slimprotoThread([&slimproto]() {
+        std::thread slimprotoThread([&slimproto, &config]() {
+            if (config.cpuOther >= 0) {
+                cpu_set_t cpuset;
+                CPU_ZERO(&cpuset);
+                CPU_SET(config.cpuOther, &cpuset);
+                if (pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset) == 0) {
+                    std::cout << "[Slimproto] Thread pinned to CPU core "
+                              << config.cpuOther << std::endl;
+                }
+            }
             slimproto->run();
         });
 

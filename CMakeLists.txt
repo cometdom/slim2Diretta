@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.10)
-project(slim2diretta VERSION 1.2.5)
+project(slim2diretta VERSION 1.2.6)
 
 set(CMAKE_CXX_STANDARD 17)
 
@@ -534,6 +534,22 @@ endif()
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -O2")
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+# ============================================
+# Link-Time Optimization (LTO)
+# ============================================
+# Enable with: cmake -DENABLE_LTO=ON ..
+# Recommended with clang for best results:
+#   CC=clang CXX=clang++ cmake -DENABLE_LTO=ON ..
+option(ENABLE_LTO "Enable Link-Time Optimization (-flto)" OFF)
+if(ENABLE_LTO)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -flto")
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -flto")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -flto")
+    message(STATUS "LTO: ENABLED (${CMAKE_CXX_COMPILER_ID})")
+else()
+    message(STATUS "LTO: DISABLED (enable with -DENABLE_LTO=ON)")
+endif()
+
 # Architecture-specific SIMD flags
 # TARGET_MARCH allows cross-compilation: cmake -DTARGET_MARCH=v3 ..
 # Values: v2, v3, v4, zen4, native (default: auto-detect from ARCH_NAME or CPU)
@@ -667,6 +683,11 @@ message(STATUS "  libFLAC:        ${FLAC_LIBRARIES}")
 message(STATUS "")
 message(STATUS "Build:")
 message(STATUS "  Compiler:       ${CMAKE_CXX_COMPILER}")
+if(ENABLE_LTO)
+    message(STATUS "  LTO:            ENABLED")
+else()
+    message(STATUS "  LTO:            disabled")
+endif()
 message(STATUS "  Target:         slim2diretta")
 message(STATUS "")
 message(STATUS "═══════════════════════════════════════════════════════")
