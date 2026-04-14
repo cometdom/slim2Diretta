@@ -287,11 +287,11 @@ build_slim2diretta() {
     # Resolve SDK path before cd build (relative paths break after cd)
     export DIRETTA_SDK_PATH="$(realpath "$SDK_PATH")"
 
-    local cmake_env=""
     local cmake_opts=""
 
     # Environment variable shortcut: LLVM=1 -> clang + LTO + lld
-    # (matches DirettaRendererUPnP Makefile convention, non-interactive)
+    # (matches DirettaRendererUPnP Makefile convention)
+    # Without LLVM=1, build with the default compiler (gcc).
     if [ -n "$LLVM" ]; then
         if command -v clang++ >/dev/null 2>&1 && command -v clang >/dev/null 2>&1; then
             cmake_opts="-DLLVM=1"
@@ -300,30 +300,16 @@ build_slim2diretta() {
             print_error "LLVM=1 set but clang/clang++ not installed"
             exit 1
         fi
-    elif command -v clang++ >/dev/null 2>&1 && command -v clang >/dev/null 2>&1; then
-        # Interactive: offer clang + LTO if clang is installed
-        echo ""
-        echo "clang detected — clang + LTO produces a more optimized binary"
-        echo "(typically the preferred build for audio quality)."
-        read -p "Build with clang + LTO? [y/N]: " use_clang_lto
-        if [[ "$use_clang_lto" =~ ^[Yy]$ ]]; then
-            cmake_env="CC=clang CXX=clang++"
-            cmake_opts="-DENABLE_LTO=ON -DUSE_LLD=ON"
-            print_info "Using clang + LTO + lld"
-        else
-            print_info "Using default compiler (gcc)"
-        fi
+    else
+        print_info "Building with default compiler (gcc). For clang + LTO + lld,"
+        print_info "re-run with: env LLVM=1 ./install.sh -b"
     fi
 
     cd build
 
     # Configure with CMake
     print_info "Configuring with CMake..."
-    if [ -n "$cmake_env" ]; then
-        env $cmake_env cmake $cmake_opts ..
-    else
-        cmake $cmake_opts ..
-    fi
+    cmake $cmake_opts ..
 
     # Build (verbose if VERBOSE=1 or V=1 is set)
     print_info "Building slim2diretta..."
