@@ -503,6 +503,17 @@ int main(int argc, char* argv[]) {
     }
     std::cout << std::endl;
 
+    // Pin Main thread to cpuOther core if configured
+    if (config.cpuOther >= 0) {
+        cpu_set_t cpuset;
+        CPU_ZERO(&cpuset);
+        CPU_SET(config.cpuOther, &cpuset);
+        if (pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset) == 0) {
+            std::cout << "[Main] Thread pinned to CPU core "
+                      << config.cpuOther << std::endl;
+        }
+    }
+
     // Create and enable DirettaSync
     auto diretta = std::make_unique<DirettaSync>();
     diretta->setTargetIndex(config.direttaTarget - 1);  // CLI 1-indexed → API 0-indexed
