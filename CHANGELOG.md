@@ -2,6 +2,14 @@
 
 All notable changes to slim2diretta are documented in this file.
 
+## v1.2.7 (2026-04-16)
+
+### Added
+
+- **Main thread CPU affinity**: The main thread is now also pinned to the `--cpu-other` core when CPU affinity is configured. Previously it was the only thread left unpinned, still managed by the OS scheduler. (PR #9, contributed by sheviks)
+
+---
+
 ## v1.2.6 (2026-04-14)
 
 ### Added

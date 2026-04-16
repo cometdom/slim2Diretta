@@ -60,7 +60,7 @@ LMS (network)
 
 **Threading**: main (init/signals) + slimproto (TCP LMS) + audio (HTTP->decode->push) + SDK worker (DirettaSync internal)
 
-**CPU affinity** (`--cpu-audio`, `--cpu-other`): optional thread pinning via `pthread_setaffinity_np`, default `-1` (no pinning). `--cpu-audio` pins the SDK worker thread and is also passed to `DIRETTA::Sync::open(cpuMain, cpuOther, ...)`; the `OCCUPIED` flag (bit 16) is added to threadMode automatically when `cpuAudio >= 0`. `--cpu-other` pins the audio (HTTP→decode→push) and Slimproto receive threads. Both are exposed via CLI and Web UI (CPU Affinity group). Aligned with DirettaRendererUPnP.
+**CPU affinity** (`--cpu-audio`, `--cpu-other`): optional thread pinning via `pthread_setaffinity_np`, default `-1` (no pinning). `--cpu-audio` pins the SDK worker thread and is also passed to `DIRETTA::Sync::open(cpuMain, cpuOther, ...)`; the `OCCUPIED` flag (bit 16) is added to threadMode automatically when `cpuAudio >= 0`. `--cpu-other` pins the main thread, the audio (HTTP→decode→push) thread, and the Slimproto receive thread. Both are exposed via CLI and Web UI (CPU Affinity group). Aligned with DirettaRendererUPnP.
 
 **Startup**: Both Diretta target discovery and LMS autodiscovery retry indefinitely:
 - `discoverTarget()` retries every 2s (log every 5s) until found or cancelled. Pass `std::atomic<bool>* stopSignal` to `enable()` to activate retry mode.
