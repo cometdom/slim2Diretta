@@ -2,6 +2,14 @@
 
 All notable changes to slim2diretta are documented in this file.
 
+## v1.2.8 (2026-04-17)
+
+### Added
+
+- **Web UI Stop button**: Added a Stop button alongside the existing Save & Restart and Restart Only buttons. Useful for users running slim2diretta on their own Linux distributions to stop the service directly from the web UI — e.g., to release the Diretta target for another player or before maintenance. Includes a confirmation dialog.
+
+---
+
 ## v1.2.7 (2026-04-16)
 
 ### Added
