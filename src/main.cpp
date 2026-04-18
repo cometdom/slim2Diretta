@@ -35,7 +35,7 @@
 #include <pthread.h>
 #include <sched.h>
 
-#define SLIM2DIRETTA_VERSION "1.2.6"
+#define SLIM2DIRETTA_VERSION "1.2.8"
 
 // ============================================
 // Async Logging Infrastructure
