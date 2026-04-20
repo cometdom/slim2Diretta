@@ -1,4 +1,4 @@
-# slim2diretta v1.2.8
+# slim2diretta v1.3.0
 
 **Native LMS Player with Diretta Output - Mono-Process Architecture**
 
@@ -8,7 +8,7 @@
 
 ---
 
-![Version](https://img.shields.io/badge/version-1.2.8-blue.svg)
+![Version](https://img.shields.io/badge/version-1.3.0-blue.svg)
 ![DSD](https://img.shields.io/badge/DSD-Native-green.svg)
 ![SDK](https://img.shields.io/badge/SDK-DIRETTA::Sync-orange.svg)
 
@@ -534,17 +534,25 @@ Diretta Advanced Options:
   --thread-mode <bitmask>        SDK thread mode bitmask (default: 1)
   --mtu <bytes>                  MTU size (default: auto-detect)
 
-CPU Affinity (optional):
-  --cpu-audio <core>             Pin SDK worker + Diretta hot path to this core
-  --cpu-other <core>             Pin audio/decode/slimproto threads to this core
+CPU Affinity (optional, accepts single core or comma-separated list):
+  --cpu-audio <core[,core...]>   Pin SDK worker + Diretta hot path to core(s)
+  --cpu-other <core[,core...]>   Pin audio/decode/slimproto threads to core(s)
+
+Buffer Configuration (0/empty = use defaults):
+  --pcm-buffer-seconds <s>       PCM buffer size in seconds (default 0.5)
+  --dsd-buffer-seconds <s>       DSD buffer size in seconds (default 0.8)
+  --pcm-prefill-ms <ms>          PCM prefill in ms (default 80)
+  --dsd-prefill-ms <ms>          DSD prefill in ms (default 200)
 ```
 
 ### CPU Affinity (Thread Pinning)
 
 `--cpu-audio` and `--cpu-other` pin specific threads to dedicated CPU cores to reduce jitter and improve real-time performance. This is particularly beneficial on systems with CPU isolation (`isolcpus` kernel parameter).
 
-- `--cpu-audio <core>`: pins the Diretta SDK worker thread (the hot path that sends packets to the target) to the specified core. Automatically enables the SDK `OCCUPIED` thread mode flag (bit 16).
-- `--cpu-other <core>`: pins the audio/decode thread (HTTP reader + decoder + ring buffer push) and the Slimproto TCP receive thread to the specified core.
+- `--cpu-audio <core[,core...]>`: pins the Diretta SDK worker thread (the hot path that sends packets to the target) to the specified core(s). Automatically enables the SDK `OCCUPIED` thread mode flag (bit 16). The SDK itself receives only the first core of the list.
+- `--cpu-other <core[,core...]>`: pins the audio/decode thread (HTTP reader + decoder + ring buffer push) and the Slimproto TCP receive thread to the specified core(s).
+
+Both options accept either a single core or a comma-separated list. When multiple cores are provided, the kernel scheduler may move the thread within the set.
 
 **Example**: on an 8-core system with cores 2 and 3 isolated via `isolcpus=2,3`:
 ```bash
@@ -552,6 +560,17 @@ sudo slim2diretta --target 1 --cpu-audio 2 --cpu-other 3
 ```
 
 Both options also accept the value via the Web UI (CPU Affinity section).
+
+### Buffer Configuration
+
+Starting with v1.3.0, buffer sizes and prefill durations can be tuned to suit the host/network environment. Defaults are conservative and work well for most setups; tuning is only useful for specific scenarios (e.g., high sample rates with tight latency, or very slow storage).
+
+- `--pcm-buffer-seconds <s>`: PCM ring buffer size in seconds (default 0.5s). Larger values absorb more jitter at the cost of latency.
+- `--dsd-buffer-seconds <s>`: DSD ring buffer size in seconds (default 0.8s).
+- `--pcm-prefill-ms <ms>`: how much audio to preload before playback starts (default 80ms).
+- `--dsd-prefill-ms <ms>`: same for DSD (default 200ms).
+
+These options are also available in the Web UI under a "Buffer Configuration" section.
 
 ### Configuration File (/etc/default/slim2diretta)
 
@@ -828,4 +847,4 @@ This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) 
 
 **Enjoy native DSD and hi-res PCM streaming from your LMS library!**
 
-*Last updated: 2026-04-18 (v1.2.8)*
+*Last updated: 2026-04-18 (v1.3.0)*

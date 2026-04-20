@@ -27,9 +27,16 @@ struct Config {
     unsigned int cycleMinTime = 0;      // Min cycle for RANDOM mode (0 = unused)
     unsigned int targetProfileLimitTime = 0;   // 0=SelfProfile (stable), >0=TargetProfile(µs)
 
-    // CPU affinity (-1 = no pinning)
-    int cpuAudio = -1;                  // Core for SDK worker + Diretta hot path
-    int cpuOther = -1;                  // Core for audio/decode/slimproto threads
+    // CPU affinity (empty = no pinning). Accepts comma-separated cores: "6" or "6,7,8"
+    std::string cpuAudio;               // Core(s) for SDK worker + Diretta hot path
+    std::string cpuOther;               // Core(s) for audio/decode/slimproto threads
+
+    // Buffer configuration (0 = use built-in defaults from DirettaSync)
+    // Note: slim2Diretta receives audio from LMS locally, no remote-specific variant.
+    float pcmBufferSeconds = 0.0f;         // PCM buffer size in seconds
+    float dsdBufferSeconds = 0.0f;         // DSD buffer size in seconds
+    unsigned int pcmPrefillMs = 0;         // PCM prefill duration in ms
+    unsigned int dsdPrefillMs = 0;         // DSD prefill duration in ms
 
     // Audio
     int maxSampleRate = 1536000;

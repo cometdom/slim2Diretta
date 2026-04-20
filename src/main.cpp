@@ -26,6 +26,7 @@
 #include <vector>
 #include <mutex>
 #include <optional>
+#include <sstream>
 
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -35,7 +36,53 @@
 #include <pthread.h>
 #include <sched.h>
 
-#define SLIM2DIRETTA_VERSION "1.2.8"
+#define SLIM2DIRETTA_VERSION "1.3.0"
+
+// Parse comma-separated core list (e.g. "6,7,8") into a vector of ints.
+// Returns empty vector on parse error or empty input.
+static std::vector<int> parseCoreList(const std::string& spec) {
+    std::vector<int> cores;
+    if (spec.empty()) return cores;
+    std::stringstream ss(spec);
+    std::string token;
+    while (std::getline(ss, token, ',')) {
+        auto start = token.find_first_not_of(" \t");
+        auto end = token.find_last_not_of(" \t");
+        if (start == std::string::npos) continue;
+        token = token.substr(start, end - start + 1);
+        try {
+            int core = std::stoi(token);
+            if (core >= 0) cores.push_back(core);
+        } catch (const std::exception&) {
+            // Ignore invalid tokens
+        }
+    }
+    return cores;
+}
+
+// Pin current thread to one or more CPU cores.
+// When multiple cores are given, the kernel scheduler may pick among them.
+// Returns true on success.
+static bool pinThreadToCores(const std::vector<int>& cores, const char* threadName) {
+    if (cores.empty()) return false;
+    cpu_set_t cpuset;
+    CPU_ZERO(&cpuset);
+    for (int core : cores) CPU_SET(core, &cpuset);
+    int ret = pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
+    if (ret != 0) {
+        std::cerr << "[" << threadName << "] Failed to set CPU affinity: "
+                  << strerror(ret) << std::endl;
+        return false;
+    }
+    std::ostringstream coreStr;
+    for (size_t i = 0; i < cores.size(); i++) {
+        if (i > 0) coreStr << ",";
+        coreStr << cores[i];
+    }
+    std::cout << "[" << threadName << "] Pinned to CPU core(s) "
+              << coreStr.str() << std::endl;
+    return true;
+}
 
 // ============================================
 // Async Logging Infrastructure
@@ -244,24 +291,64 @@ Config parseArguments(int argc, char* argv[]) {
             }
         }
         else if (arg == "--cpu-audio" && i + 1 < argc) {
-            config.cpuAudio = std::atoi(argv[++i]);
+            config.cpuAudio = argv[++i];
+            // Validate: accepts comma-separated cores (e.g. "6" or "6,7,8")
             int numCores = static_cast<int>(std::thread::hardware_concurrency());
-            if (config.cpuAudio < 0 || config.cpuAudio >= numCores) {
-                std::cerr << "Warning: --cpu-audio " << config.cpuAudio
-                          << " out of range [0," << (numCores - 1)
-                          << "], ignoring" << std::endl;
-                config.cpuAudio = -1;
+            std::stringstream ss(config.cpuAudio);
+            std::string tok;
+            while (std::getline(ss, tok, ',')) {
+                try {
+                    int core = std::stoi(tok);
+                    if (core < 0 || core >= numCores) {
+                        std::cerr << "Warning: --cpu-audio core " << core
+                                  << " out of range [0," << (numCores - 1)
+                                  << "], ignoring" << std::endl;
+                        config.cpuAudio.clear();
+                        break;
+                    }
+                } catch (const std::exception&) {
+                    std::cerr << "Warning: invalid --cpu-audio value '"
+                              << config.cpuAudio << "', ignoring" << std::endl;
+                    config.cpuAudio.clear();
+                    break;
+                }
             }
         }
         else if (arg == "--cpu-other" && i + 1 < argc) {
-            config.cpuOther = std::atoi(argv[++i]);
+            config.cpuOther = argv[++i];
             int numCores = static_cast<int>(std::thread::hardware_concurrency());
-            if (config.cpuOther < 0 || config.cpuOther >= numCores) {
-                std::cerr << "Warning: --cpu-other " << config.cpuOther
-                          << " out of range [0," << (numCores - 1)
-                          << "], ignoring" << std::endl;
-                config.cpuOther = -1;
+            std::stringstream ss(config.cpuOther);
+            std::string tok;
+            while (std::getline(ss, tok, ',')) {
+                try {
+                    int core = std::stoi(tok);
+                    if (core < 0 || core >= numCores) {
+                        std::cerr << "Warning: --cpu-other core " << core
+                                  << " out of range [0," << (numCores - 1)
+                                  << "], ignoring" << std::endl;
+                        config.cpuOther.clear();
+                        break;
+                    }
+                } catch (const std::exception&) {
+                    std::cerr << "Warning: invalid --cpu-other value '"
+                              << config.cpuOther << "', ignoring" << std::endl;
+                    config.cpuOther.clear();
+                    break;
+                }
             }
+        }
+        // Buffer configuration (v1.3.0)
+        else if (arg == "--pcm-buffer-seconds" && i + 1 < argc) {
+            config.pcmBufferSeconds = static_cast<float>(std::atof(argv[++i]));
+        }
+        else if (arg == "--dsd-buffer-seconds" && i + 1 < argc) {
+            config.dsdBufferSeconds = static_cast<float>(std::atof(argv[++i]));
+        }
+        else if (arg == "--pcm-prefill-ms" && i + 1 < argc) {
+            config.pcmPrefillMs = std::atoi(argv[++i]);
+        }
+        else if (arg == "--dsd-prefill-ms" && i + 1 < argc) {
+            config.dsdPrefillMs = std::atoi(argv[++i]);
         }
         else if (arg == "--list-targets" || arg == "-l") {
             config.listTargets = true;
@@ -301,9 +388,15 @@ Config parseArguments(int argc, char* argv[]) {
                       << "  --mtu <bytes>              MTU override (default: auto)\n"
                       << "  --rt-priority <1-99>       SCHED_FIFO real-time priority for worker thread (default: 50)\n"
                       << "\n"
-                      << "CPU Affinity (optional, -1 = no pinning):\n"
-                      << "  --cpu-audio <core>         Pin SDK worker + Diretta hot path to this core\n"
-                      << "  --cpu-other <core>         Pin audio/decode/slimproto threads to this core\n"
+                      << "CPU Affinity (optional, empty = no pinning):\n"
+                      << "  --cpu-audio <core[,core...]>   Pin SDK worker + Diretta hot path to core(s)\n"
+                      << "  --cpu-other <core[,core...]>   Pin audio/decode/slimproto threads to core(s)\n"
+                      << "\n"
+                      << "Buffer configuration (0 = use defaults):\n"
+                      << "  --pcm-buffer-seconds <s>       PCM buffer size in seconds (default 0.5)\n"
+                      << "  --dsd-buffer-seconds <s>       DSD buffer size in seconds (default 0.8)\n"
+                      << "  --pcm-prefill-ms <ms>          PCM prefill in ms (default 80)\n"
+                      << "  --dsd-prefill-ms <ms>          DSD prefill in ms (default 200)\n"
                       << "\n"
                       << "Audio:\n"
                       << "  --max-rate <hz>        Max sample rate (default: 1536000)\n"
@@ -503,14 +596,11 @@ int main(int argc, char* argv[]) {
     }
     std::cout << std::endl;
 
-    // Pin Main thread to cpuOther core if configured
-    if (config.cpuOther >= 0) {
-        cpu_set_t cpuset;
-        CPU_ZERO(&cpuset);
-        CPU_SET(config.cpuOther, &cpuset);
-        if (pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset) == 0) {
-            std::cout << "[Main] Thread pinned to CPU core "
-                      << config.cpuOther << std::endl;
+    // Pin Main thread to cpuOther core(s) if configured
+    {
+        auto otherCores = parseCoreList(config.cpuOther);
+        if (!otherCores.empty()) {
+            pinThreadToCores(otherCores, "Main");
         }
     }
 
@@ -529,6 +619,11 @@ int main(int argc, char* argv[]) {
     direttaConfig.targetProfileLimitTime = config.targetProfileLimitTime;
     direttaConfig.cpuAudio = config.cpuAudio;
     direttaConfig.cpuOther = config.cpuOther;
+    // Buffer configuration (0 = use defaults)
+    direttaConfig.pcmBufferSeconds = config.pcmBufferSeconds;
+    direttaConfig.dsdBufferSeconds = config.dsdBufferSeconds;
+    direttaConfig.pcmPrefillMs = config.pcmPrefillMs;
+    direttaConfig.dsdPrefillMs = config.dsdPrefillMs;
     if (!config.transferMode.empty()) {
         if (config.transferMode == "varmax")
             direttaConfig.transferMode = DirettaTransferMode::VAR_MAX;
@@ -690,14 +785,11 @@ int main(int argc, char* argv[]) {
                 audioThreadDone.store(false, std::memory_order_release);
                 audioTestThread = std::thread([&httpStream, &slimproto, &audioTestRunning, &audioThreadDone, &hasPendingTrack, &pendingMutex, &pendingNextTrack, formatCode, pcmRate, pcmSize, pcmChannels, pcmEndian, direttaPtr, &config]() {
 
-                    // Pin audio/decode thread to cpuOther core if configured
-                    if (config.cpuOther >= 0) {
-                        cpu_set_t cpuset;
-                        CPU_ZERO(&cpuset);
-                        CPU_SET(config.cpuOther, &cpuset);
-                        if (pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset) == 0) {
-                            std::cout << "[Audio] Thread pinned to CPU core "
-                                      << config.cpuOther << std::endl;
+                    // Pin audio/decode thread to cpuOther core(s) if configured
+                    {
+                        auto otherCores = parseCoreList(config.cpuOther);
+                        if (!otherCores.empty()) {
+                            pinThreadToCores(otherCores, "Audio");
                         }
                     }
 
@@ -1646,14 +1738,9 @@ int main(int argc, char* argv[]) {
 
         // Run slimproto receive loop in a dedicated thread
         std::thread slimprotoThread([&slimproto, &config]() {
-            if (config.cpuOther >= 0) {
-                cpu_set_t cpuset;
-                CPU_ZERO(&cpuset);
-                CPU_SET(config.cpuOther, &cpuset);
-                if (pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset) == 0) {
-                    std::cout << "[Slimproto] Thread pinned to CPU core "
-                              << config.cpuOther << std::endl;
-                }
+            auto otherCores = parseCoreList(config.cpuOther);
+            if (!otherCores.empty()) {
+                pinThreadToCores(otherCores, "Slimproto");
             }
             slimproto->run();
         });

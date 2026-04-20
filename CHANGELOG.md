@@ -2,6 +2,21 @@
 
 All notable changes to slim2diretta are documented in this file.
 
+## v1.3.0 (unreleased)
+
+### Added
+
+- **Multi-core CPU affinity**: `--cpu-audio` and `--cpu-other` now accept a comma-separated list of cores (e.g., `--cpu-audio 3,4`). When multiple cores are provided, the kernel scheduler may distribute the thread between them. Single-core syntax (e.g., `--cpu-audio 3`) remains fully supported. The SDK itself still receives only the first core of the list (SDK limitation). Aligned with DirettaRendererUPnP v2.3.0.
+- **Configurable buffer settings**: New CLI options to tune the Diretta ring buffer and prefill duration, exposed in the web UI under a new "Buffer Configuration" section:
+  - `--pcm-buffer-seconds <s>` — PCM buffer size in seconds (default 0.5s)
+  - `--dsd-buffer-seconds <s>` — DSD buffer size in seconds (default 0.8s)
+  - `--pcm-prefill-ms <ms>` — PCM prefill duration in ms (default 80ms)
+  - `--dsd-prefill-ms <ms>` — DSD prefill duration in ms (default 200ms)
+
+### Changed
+
+- Config fields `cpuAudio` and `cpuOther` are now strings (previously `int`). Existing single-core values keep working unchanged.
+
 ## v1.2.8 (2026-04-18)
 
 ### Added

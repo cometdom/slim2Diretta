@@ -9,8 +9,29 @@
 #include "DirettaSync.h"
 #include <stdexcept>
 #include <iomanip>
+#include <sstream>
 #include <pthread.h>
 #include <sched.h>
+
+// Parse comma-separated core list (e.g. "6,7,8") into a vector of ints.
+// Returns empty vector on parse error or empty input.
+std::vector<int> parseCoreListStr(const std::string& spec) {
+    std::vector<int> cores;
+    if (spec.empty()) return cores;
+    std::stringstream ss(spec);
+    std::string token;
+    while (std::getline(ss, token, ',')) {
+        auto start = token.find_first_not_of(" \t");
+        auto end = token.find_last_not_of(" \t");
+        if (start == std::string::npos) continue;
+        token = token.substr(start, end - start + 1);
+        try {
+            int core = std::stoi(token);
+            if (core >= 0) cores.push_back(core);
+        } catch (const std::exception&) {}
+    }
+    return cores;
+}
 
 namespace {
 
@@ -164,10 +185,16 @@ bool DirettaSync::openSyncConnection() {
     ACQUA::Clock infoCycle = ACQUA::Clock::MicroSeconds(m_config.infoCycle);
 
     // CPU affinity: when cpuAudio is set, add OCCUPIED flag to enable SDK CPU pinning
+    // SDK only accepts a single core — use the first one from the list.
+    auto audioCores = parseCoreListStr(m_config.cpuAudio);
+    auto otherCores = parseCoreListStr(m_config.cpuOther);
+    int sdkCpuAudio = audioCores.empty() ? -1 : audioCores.front();
+    int sdkCpuOther = otherCores.empty() ? -1 : otherCores.front();
+
     int threadMode = m_config.threadMode;
-    if (m_config.cpuAudio >= 0) {
+    if (sdkCpuAudio >= 0) {
         threadMode |= 16;  // OCCUPIED = pin SDK thread to CPU
-        DIRETTA_LOG("CPU affinity: SDK thread pinned to core " << m_config.cpuAudio
+        DIRETTA_LOG("CPU affinity: SDK thread pinned to core " << sdkCpuAudio
                     << " (OCCUPIED mode, threadMode=" << threadMode << ")");
     }
 
@@ -183,7 +210,7 @@ bool DirettaSync::openSyncConnection() {
         opened = DIRETTA::Sync::open(
             DIRETTA::Sync::THRED_MODE(threadMode),
             infoCycle, 0, "slim2diretta", 0x44525400,
-            m_config.cpuAudio, m_config.cpuOther, 0, DIRETTA::Sync::MSMODE_AUTO);
+            sdkCpuAudio, sdkCpuOther, 0, DIRETTA::Sync::MSMODE_AUTO);
     }
 
     if (!opened) {
@@ -981,14 +1008,19 @@ bool DirettaSync::reopenForFormatChange() {
 
     ACQUA::Clock infoCycle = ACQUA::Clock::MicroSeconds(m_config.infoCycle);
 
+    auto audioCores = parseCoreListStr(m_config.cpuAudio);
+    auto otherCores = parseCoreListStr(m_config.cpuOther);
+    int sdkCpuAudio = audioCores.empty() ? -1 : audioCores.front();
+    int sdkCpuOther = otherCores.empty() ? -1 : otherCores.front();
+
     int threadMode = m_config.threadMode;
-    if (m_config.cpuAudio >= 0) {
+    if (sdkCpuAudio >= 0) {
         threadMode |= 16;  // OCCUPIED
     }
     if (!DIRETTA::Sync::open(
             DIRETTA::Sync::THRED_MODE(threadMode),
             infoCycle, 0, "slim2diretta", 0x44525400,
-            m_config.cpuAudio, m_config.cpuOther, 0, DIRETTA::Sync::MSMODE_AUTO)) {
+            sdkCpuAudio, sdkCpuOther, 0, DIRETTA::Sync::MSMODE_AUTO)) {
         std::cerr << "[DirettaSync] Failed to re-open sync" << std::endl;
         return false;
     }
@@ -1222,15 +1254,25 @@ size_t DirettaSync::calculateAlignedPrefill(size_t bytesPerSecond, size_t bytesP
 
     size_t targetMs;
     if (isDSD) {
-        targetMs = DirettaBuffer::PREFILL_MS_DSD;
+        targetMs = (m_config.dsdPrefillMs > 0)
+            ? m_config.dsdPrefillMs
+            : DirettaBuffer::PREFILL_MS_DSD;
     } else if (highRate && isCompressed) {
-        targetMs = DirettaBuffer::PREFILL_MS_HIGHRATE_COMPRESSED;
+        targetMs = (m_config.pcmPrefillMs > 0)
+            ? m_config.pcmPrefillMs
+            : DirettaBuffer::PREFILL_MS_HIGHRATE_COMPRESSED;
     } else if (highRate) {
-        targetMs = DirettaBuffer::PREFILL_MS_HIGHRATE_UNCOMPRESSED;
+        targetMs = (m_config.pcmPrefillMs > 0)
+            ? m_config.pcmPrefillMs
+            : DirettaBuffer::PREFILL_MS_HIGHRATE_UNCOMPRESSED;
     } else if (isCompressed) {
-        targetMs = DirettaBuffer::PREFILL_MS_COMPRESSED;
+        targetMs = (m_config.pcmPrefillMs > 0)
+            ? m_config.pcmPrefillMs
+            : DirettaBuffer::PREFILL_MS_COMPRESSED;
     } else {
-        targetMs = DirettaBuffer::PREFILL_MS_UNCOMPRESSED;
+        targetMs = (m_config.pcmPrefillMs > 0)
+            ? m_config.pcmPrefillMs
+            : DirettaBuffer::PREFILL_MS_UNCOMPRESSED;
     }
 
     // Convert to bytes
@@ -1275,7 +1317,9 @@ void DirettaSync::configureRingPCM(int rate, int channels, int direttaBps, int i
     m_consumerStateGen.fetch_add(1, std::memory_order_release);
 
     size_t bytesPerSecond = static_cast<size_t>(rate) * channels * direttaBps;
-    float bufferSec = DirettaBuffer::pcmBufferSeconds(static_cast<uint32_t>(rate));
+    float bufferSec = (m_config.pcmBufferSeconds > 0.0f)
+        ? m_config.pcmBufferSeconds
+        : DirettaBuffer::pcmBufferSeconds(static_cast<uint32_t>(rate));
     size_t ringSize = DirettaBuffer::calculateBufferSize(bytesPerSecond, bufferSec);
 
     m_ringBuffer.resize(ringSize, 0x00);
@@ -1339,7 +1383,10 @@ void DirettaSync::configureRingDSD(uint32_t byteRate, int channels) {
     m_consumerStateGen.fetch_add(1, std::memory_order_release);
 
     uint32_t bytesPerSecond = byteRate * channels;
-    size_t ringSize = DirettaBuffer::calculateBufferSize(bytesPerSecond, DirettaBuffer::DSD_BUFFER_SECONDS);
+    float dsdBufSec = (m_config.dsdBufferSeconds > 0.0f)
+        ? m_config.dsdBufferSeconds
+        : DirettaBuffer::DSD_BUFFER_SECONDS;
+    size_t ringSize = DirettaBuffer::calculateBufferSize(bytesPerSecond, dsdBufSec);
 
     m_ringBuffer.resize(ringSize, 0x69);  // DSD silence
     ringSize = m_ringBuffer.size();
@@ -1809,18 +1856,25 @@ bool DirettaSync::startSyncWorker() {
         // SCHED_FIFO priority 50 (mid-range real-time) - requires root/CAP_SYS_NICE
         setRealtimePriority(g_rtPriority);
 
-        // Pin worker thread to cpuAudio core (belt and suspenders with SDK
-        // cpuMain which doesn't always work, e.g., on RPi 4)
-        if (m_config.cpuAudio >= 0) {
+        // Pin worker thread to cpuAudio core(s). With multiple cores the kernel
+        // scheduler may move the thread within the set. Belt and suspenders
+        // with SDK cpuMain which doesn't always work on some platforms (RPi 4).
+        auto workerCores = parseCoreListStr(m_config.cpuAudio);
+        if (!workerCores.empty()) {
             cpu_set_t cpuset;
             CPU_ZERO(&cpuset);
-            CPU_SET(m_config.cpuAudio, &cpuset);
+            for (int core : workerCores) CPU_SET(core, &cpuset);
+            std::ostringstream coreStr;
+            for (size_t i = 0; i < workerCores.size(); i++) {
+                if (i > 0) coreStr << ",";
+                coreStr << workerCores[i];
+            }
             if (pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset) == 0) {
-                std::cout << "[DirettaSync] Worker thread pinned to CPU core "
-                          << m_config.cpuAudio << std::endl;
+                std::cout << "[DirettaSync] Worker thread pinned to CPU core(s) "
+                          << coreStr.str() << std::endl;
             } else {
-                std::cerr << "[DirettaSync] WARNING: Failed to pin worker to core "
-                          << m_config.cpuAudio << std::endl;
+                std::cerr << "[DirettaSync] WARNING: Failed to pin worker to core(s) "
+                          << coreStr.str() << std::endl;
             }
         }
 
