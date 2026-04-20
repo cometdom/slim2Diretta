@@ -41,8 +41,14 @@ sudo ./slim2diretta -s <lms-ip> --target 1
 # With player name and verbose
 sudo ./slim2diretta -s <lms-ip> --target 1 -n "Living Room" -v
 
-# With CPU affinity (cores 2 and 3 isolated via isolcpus=2,3)
+# With CPU affinity (single core each — cores 2 and 3 isolated via isolcpus=2,3)
 sudo ./slim2diretta --target 1 --cpu-audio 2 --cpu-other 3
+
+# Multi-core affinity (v1.3.0+): audio thread can float between cores 2,3
+sudo ./slim2diretta --target 1 --cpu-audio 2,3 --cpu-other 4
+
+# Tune buffer sizes (v1.3.0+)
+sudo ./slim2diretta --target 1 --pcm-buffer-seconds 1.0 --dsd-buffer-seconds 1.2
 ```
 
 ## Architecture
@@ -60,7 +66,9 @@ LMS (network)
 
 **Threading**: main (init/signals) + slimproto (TCP LMS) + audio (HTTP->decode->push) + SDK worker (DirettaSync internal)
 
-**CPU affinity** (`--cpu-audio`, `--cpu-other`): optional thread pinning via `pthread_setaffinity_np`, default `-1` (no pinning). `--cpu-audio` pins the SDK worker thread and is also passed to `DIRETTA::Sync::open(cpuMain, cpuOther, ...)`; the `OCCUPIED` flag (bit 16) is added to threadMode automatically when `cpuAudio >= 0`. `--cpu-other` pins the main thread, the audio (HTTP→decode→push) thread, and the Slimproto receive thread. Both are exposed via CLI and Web UI (CPU Affinity group). Aligned with DirettaRendererUPnP.
+**CPU affinity** (`--cpu-audio`, `--cpu-other`): optional thread pinning via `pthread_setaffinity_np`, default empty (no pinning). Since v1.3.0 accepts either a single core (`3`) or a comma-separated list (`3,4`). `--cpu-audio` pins the SDK worker thread and is also passed to `DIRETTA::Sync::open(cpuMain, cpuOther, ...)` — the SDK only takes a single core, so the first value from the list is used; the `OCCUPIED` flag (bit 16) is added to threadMode automatically when `cpuAudio` is non-empty. `--cpu-other` pins the main thread, the audio (HTTP→decode→push) thread, and the Slimproto receive thread. Both are exposed via CLI and Web UI (CPU Affinity group). Aligned with DirettaRendererUPnP.
+
+**Buffer configuration** (v1.3.0+): `--pcm-buffer-seconds`, `--dsd-buffer-seconds`, `--pcm-prefill-ms`, `--dsd-prefill-ms`. Zero/empty means "use defaults" from the `DirettaBuffer` namespace. The override is applied in `configureRingPCM()`, `configureRingDSD()`, and `calculateAlignedPrefill()`. Exposed via CLI and Web UI (Buffer Configuration group).
 
 **Startup**: Both Diretta target discovery and LMS autodiscovery retry indefinitely:
 - `discoverTarget()` retries every 2s (log every 5s) until found or cancelled. Pass `std::atomic<bool>* stopSignal` to `enable()` to activate retry mode.

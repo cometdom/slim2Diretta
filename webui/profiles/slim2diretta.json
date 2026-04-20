@@ -69,21 +69,61 @@
             "settings": [
                 {
                     "key": "cpu-audio",
-                    "type": "number",
+                    "type": "text",
                     "cli_arg": "--cpu-audio",
-                    "label": "Audio Core",
-                    "description": "Pin SDK worker + Diretta hot path to this CPU core. Empty = no pinning.",
-                    "default": "",
-                    "min": 0
+                    "label": "Audio Core(s)",
+                    "description": "Pin SDK worker + Diretta hot path to CPU core(s). Single core (e.g. '3') or comma-separated list (e.g. '3,4'). Empty = no pinning.",
+                    "default": ""
                 },
                 {
                     "key": "cpu-other",
-                    "type": "number",
+                    "type": "text",
                     "cli_arg": "--cpu-other",
-                    "label": "Other Core",
-                    "description": "Pin audio/decode/slimproto threads to this CPU core. Empty = no pinning.",
+                    "label": "Other Core(s)",
+                    "description": "Pin audio/decode/slimproto threads to CPU core(s). Single core or comma-separated list. Empty = no pinning.",
+                    "default": ""
+                }
+            ]
+        },
+        {
+            "name": "Buffer Configuration",
+            "collapsed": true,
+            "settings": [
+                {
+                    "key": "pcm-buffer-seconds",
+                    "type": "number",
+                    "cli_arg": "--pcm-buffer-seconds",
+                    "label": "PCM Buffer (seconds)",
+                    "description": "PCM ring buffer size in seconds. Empty = default (0.5s).",
                     "default": "",
-                    "min": 0
+                    "step": 0.1
+                },
+                {
+                    "key": "dsd-buffer-seconds",
+                    "type": "number",
+                    "cli_arg": "--dsd-buffer-seconds",
+                    "label": "DSD Buffer (seconds)",
+                    "description": "DSD ring buffer size in seconds. Empty = default (0.8s).",
+                    "default": "",
+                    "step": 0.1
+                },
+                {
+                    "key": "pcm-prefill-ms",
+                    "type": "number",
+                    "cli_arg": "--pcm-prefill-ms",
+                    "label": "PCM Prefill (ms)",
+                    "description": "PCM prefill duration before playback starts. Empty = default (80ms).",
+                    "default": "",
+                    "min": 10
+                },
+                {
+                    "key": "dsd-prefill-ms",
+                    "type": "number",
+                    "cli_arg": "--dsd-prefill-ms",
+                    "label": "DSD Prefill (ms)",
+                    "description": "DSD prefill duration before playback starts. Empty = default (200ms).",
+                    "default": "",
+                    "min": 10
                 }
             ]
         },
