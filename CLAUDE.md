@@ -120,7 +120,7 @@ LMS (network)
 **Wrapper-level audiophile tuning (v1.3.0, mirrored from DirettaRendererUPnP v2.4.0)**: three system-wide tweaks applied by `start-slim2diretta.sh` before launching the binary, all configured via shell vars in `/etc/default/slim2diretta` and exposed in the web UI under "Advanced System & Network Tuning":
 
 - `TARGET_INTERFACE` / `TARGET_SPEED` / `TARGET_DUPLEX` → forces NIC link via `ethtool -s`. `ethtool` missing is a non-fatal warning.
-- `IRQ_INTERFACE` / `IRQ_CPUS` → walks `/proc/interrupts`, writes each `/proc/irq/N/smp_affinity_list` for IRQs whose name contains `IRQ_INTERFACE` (matches MSI-X queues like `enpXsY-rx-0`). Kernel-managed IRQs that refuse runtime reassignment are reported as "skipped".
+- `IRQ_INTERFACE` / `IRQ_CPUS` → walks `/proc/interrupts`, writes each `/proc/irq/N/smp_affinity_list` for IRQs whose name contains any interface listed in `IRQ_INTERFACE` (single name or comma-separated, e.g. `"enp1s0,enp2s0"` for a host with one NIC for LMS upstream and one for the Diretta target). Matches MSI-X queues like `enpXsY-rx-0`. Kernel-managed IRQs that refuse runtime reassignment are reported as "skipped".
 - `SMT` (`on` / `off` / `forceoff` / empty) → writes `/sys/devices/system/cpu/smt/control`. BIOS lock or unsupported control is a non-fatal warning. Toggle is non-persistent across kernel reboots; the wrapper re-applies it on each service start. Note: SMT changes the logical-CPU numbering, so `--cpu-audio` / `--cpu-other` values must be valid in the chosen state.
 
 ## Code Style
