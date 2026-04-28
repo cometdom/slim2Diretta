@@ -86,6 +86,70 @@
             ]
         },
         {
+            "name": "Advanced System & Network Tuning",
+            "collapsed": true,
+            "config_type": "shell_vars",
+            "settings": [
+                {
+                    "key": "TARGET_INTERFACE",
+                    "type": "text",
+                    "label": "Target Network Interface",
+                    "description": "Interface name (eth0, enp1s0) for the link to the Diretta target. Leave empty to disable link tuning. Requires the ethtool package on the host.",
+                    "default": ""
+                },
+                {
+                    "key": "TARGET_SPEED",
+                    "type": "select",
+                    "label": "Target Speed",
+                    "description": "Forced link speed. WARNING: 100 Mbit may underrun on DSD512+ (~45 Mbps raw) and 10 Mbit is only safe up to ~96 kHz PCM. Stay on 1000 Mbit if you stream hi-res PCM or DSD.",
+                    "default": "100",
+                    "options": [
+                        {"value": "10", "label": "10Mbit"},
+                        {"value": "100", "label": "100Mbit"},
+                        {"value": "1000", "label": "1000Mbit"}
+                    ]
+                },
+                {
+                    "key": "TARGET_DUPLEX",
+                    "type": "select",
+                    "label": "Target Duplex Mode",
+                    "description": "Forced duplex mode. Use 'full' unless you have a specific reason to test 'half'.",
+                    "default": "full",
+                    "options": [
+                        {"value": "half", "label": "half duplex"},
+                        {"value": "full", "label": "full duplex"}
+                    ]
+                },
+                {
+                    "key": "IRQ_INTERFACE",
+                    "type": "text",
+                    "label": "IRQ Affinity Interface",
+                    "description": "NIC name (eth0, enp1s0) whose hardware interrupts will be pinned to specific CPUs. Matches all related IRQs including MSI-X queues. Leave empty to disable IRQ pinning.",
+                    "default": ""
+                },
+                {
+                    "key": "IRQ_CPUS",
+                    "type": "text",
+                    "label": "IRQ Affinity CPU(s)",
+                    "description": "CPU list for NIC interrupts (e.g. '0-3', '0,2,4', '0-3,8-11'). Pick CPUs OUTSIDE your Audio Core(s) to keep network IRQ activity away from the audio worker. Some kernel-managed MSI-X queues may be read-only — they are reported as 'skipped' in the launcher log, which is normal.",
+                    "default": ""
+                },
+                {
+                    "key": "SMT",
+                    "type": "select",
+                    "label": "SMT (Hyper-Threading)",
+                    "description": "Toggle SMT system-wide at service start. WARNING: affects the whole machine, not just slim2diretta. Topology changes when SMT toggles — your Audio/Other Core(s) values must reference logical CPUs that exist in the chosen state (e.g., a 12-core CPU exposes CPUs 0-23 with SMT on, 0-11 with SMT off). Toggle is non-persistent across kernel reboots; the wrapper re-applies it on every service start. BIOS-level disable takes precedence. Leave on '(no change)' if unsure.",
+                    "default": "",
+                    "options": [
+                        {"value": "",         "label": "(no change)"},
+                        {"value": "on",       "label": "Enable (SMT on)"},
+                        {"value": "off",      "label": "Disable (SMT off)"},
+                        {"value": "forceoff", "label": "Force disable until reboot (forceoff)"}
+                    ]
+                }
+            ]
+        },
+        {
             "name": "Buffer Configuration",
             "collapsed": true,
             "settings": [

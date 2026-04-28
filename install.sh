@@ -109,6 +109,7 @@ install_dependencies() {
                 make \
                 cmake \
                 pkg-config \
+                ethtool \
                 flac-devel
             ;;
         ubuntu|debian)
@@ -118,6 +119,7 @@ install_dependencies() {
                 build-essential \
                 cmake \
                 pkg-config \
+                ethtool \
                 libflac-dev
             ;;
         arch|archarm|manjaro)
@@ -126,6 +128,7 @@ install_dependencies() {
                 base-devel \
                 cmake \
                 pkgconf \
+                ethtool \
                 flac
             ;;
         *)
