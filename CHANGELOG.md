@@ -2,7 +2,7 @@
 
 All notable changes to slim2diretta are documented in this file.
 
-## v1.3.0 (unreleased)
+## v1.3.0 (2026-04-30)
 
 ### Added
 
