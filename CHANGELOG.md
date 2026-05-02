@@ -7,6 +7,7 @@ All notable changes to slim2diretta are documented in this file.
 ### Added
 
 - **Minimal web UI profile** (`webui/profiles/slim2diretta_minimal.json`): An alternative profile alongside the existing `slim2diretta.json`, intended for downstream distributions that manage system-level tuning through their own framework (GentooPlayer, AudioLinux, etc.). The minimal profile drops everything that's wrapper-level system tuning — the entire "Advanced System & Network Tuning" group (SMT toggle, NIC link tuning, IRQ affinity) and the wrapper-level Process Priority shell vars except `RT_PRIORITY` (which is application-level via `--rt-priority` and remains exposed). It keeps everything that's strictly slim2diretta application configuration: target, server, name, decoder, verbose, CPU affinity, buffer sizes, RT priority, and Diretta SDK options. Distributions can simply point their packaging at the `_minimal.json` profile instead of the default one. The full profile remains the default for self-install on a generic Linux distribution.
+- **2.5 GbE option in `TARGET_SPEED`**: The "Advanced System & Network Tuning" web UI dropdown now includes a `2500 Mbit (2.5 GbE)` choice alongside the existing 10 / 100 / 1000 options, for hosts equipped with 2.5 GbE NICs (Realtek RTL8125, Intel I225/I226, etc.). `ethtool` will refuse the value if the underlying NIC doesn't support it, and the launcher already logs a warning in that case — no functional change to the wrapper itself. The `slim2diretta.default` comment is updated accordingly.
 
 ## v1.3.0 (2026-04-30)
 
