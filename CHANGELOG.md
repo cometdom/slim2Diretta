@@ -2,6 +2,12 @@
 
 All notable changes to slim2diretta are documented in this file.
 
+## v1.3.1 (unreleased)
+
+### Added
+
+- **Minimal web UI profile** (`webui/profiles/slim2diretta_minimal.json`): An alternative profile alongside the existing `slim2diretta.json`, intended for downstream distributions that manage system-level tuning through their own framework (GentooPlayer, AudioLinux, etc.). The minimal profile drops everything that's wrapper-level system tuning — the entire "Advanced System & Network Tuning" group (SMT toggle, NIC link tuning, IRQ affinity) and the wrapper-level Process Priority shell vars except `RT_PRIORITY` (which is application-level via `--rt-priority` and remains exposed). It keeps everything that's strictly slim2diretta application configuration: target, server, name, decoder, verbose, CPU affinity, buffer sizes, RT priority, and Diretta SDK options. Distributions can simply point their packaging at the `_minimal.json` profile instead of the default one. The full profile remains the default for self-install on a generic Linux distribution.
+
 ## v1.3.0 (2026-04-30)
 
 ### Added
