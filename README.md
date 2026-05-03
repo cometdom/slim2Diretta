@@ -227,6 +227,8 @@ If a new release introduces a new optional dependency (e.g. a new codec or the F
 
 ## Quick Start
 
+> **Note for downstream distributors (GentooPlayer, AudioLinux, etc.)**: starting with v1.3.1, each GitHub Release ships **two source tarballs** — the standard one and a `*-minimal.tar.gz` variant. The minimal tarball uses a stripped-down web UI profile that exposes only application-level configuration (target, server, name, decoder, CPU affinity, buffer sizes, RT priority, Diretta SDK options). Wrapper-level system tuning (SMT toggle, NIC link tuning via `ethtool`, IRQ affinity, nice/ionice) is removed — distributions that already manage those concerns through their own framework can pick the minimal tarball and avoid configuration overlap with no packaging-side modification. The standard tarball remains the default for self-install on a generic Linux distribution.
+
 ### Option A: Interactive Installer (Recommended)
 
 ```bash
@@ -571,6 +573,73 @@ Starting with v1.3.0, buffer sizes and prefill durations can be tuned to suit th
 - `--dsd-prefill-ms <ms>`: same for DSD (default 200ms).
 
 These options are also available in the Web UI under a "Buffer Configuration" section.
+
+#### Buffer Pipeline
+
+An audio sample travels through several stages between LMS and the Diretta target. Knowing where each buffer sits helps decide what to tune when something misbehaves.
+
+```
+                       LMS server (Slimproto over TCP)
+                                       │
+                                       ▼
+   ┌───────────────────────────────────────────────────────────────────┐
+   │ HOST (slim2diretta)                                               │
+   │                                                                   │
+   │  ┌──────────────────────────────────────────────────────────┐     │
+   │  │ ① Kernel socket receive buffer                           │     │
+   │  │    net.core.rmem_max (sysctl, global ceiling)            │     │
+   │  └─────────────────────────┬────────────────────────────────┘     │
+   │                            ▼  Slimproto receive thread           │
+   │  ┌──────────────────────────────────────────────────────────┐     │
+   │  │ ② HttpStreamClient buffer                                │     │
+   │  │    HTTP fetch from LMS / streaming services              │     │
+   │  └─────────────────────────┬────────────────────────────────┘     │
+   │                            ▼  decoder (FLAC/MP3/OGG/AAC/PCM/DSD) │
+   │  ┌──────────────────────────────────────────────────────────┐     │
+   │  │ ③ Decoder output (small)                                 │     │
+   │  └─────────────────────────┬────────────────────────────────┘     │
+   │                            ▼  SIMD format conversion             │
+   │  ┌──────────────────────────────────────────────────────────┐     │
+   │  │ ④ DirettaRingBuffer (lock-free SPSC, the main buffer)    │     │
+   │  │    PCM : 0.5 s   (--pcm-buffer-seconds)                  │     │
+   │  │    DSD : 0.8 s   (--dsd-buffer-seconds)                  │     │
+   │  │    Prefill : 80-200 ms before playback starts            │     │
+   │  └─────────────────────────┬────────────────────────────────┘     │
+   │                            ▼  getNewStream() SDK callback        │
+   │  ┌──────────────────────────────────────────────────────────┐     │
+   │  │ ⑤ Diretta SDK send queue (proprietary)                   │     │
+   │  │    MTU-sized packets, managed by DIRETTA::Sync           │     │
+   │  └─────────────────────────┬────────────────────────────────┘     │
+   │                            ▼                                      │
+   │  ┌──────────────────────────────────────────────────────────┐     │
+   │  │ ⑥ Kernel socket send buffer                              │     │
+   │  │    net.core.wmem_max (sysctl, global ceiling)            │     │
+   │  └─────────────────────────┬────────────────────────────────┘     │
+   └────────────────────────────┼──────────────────────────────────────┘
+                                │  Diretta protocol (UDP, MTU 1500-9000)
+                                ▼
+                       Diretta TARGET → DAC
+```
+
+**Role of each stage:**
+
+- **① Kernel RX socket** — absorbs network jitter from LMS or any HTTP stream LMS proxies (Tidal, Qobuz, etc.).
+- **② HttpStreamClient** — internal buffer feeding the decoder.
+- **③ Decoder output** — tiny, just block-size buffering.
+- **④ DirettaRingBuffer** — **the main buffer**, this is what determines audible latency and underrun resilience. The only one an audiophile actually tunes.
+- **⑤ Diretta SDK send queue** — internal to `DIRETTA::Sync`, MTU-sized packets ready to send. Not configurable from slim2diretta.
+- **⑥ Kernel TX socket** — symmetric to ①, ceiling for outbound UDP.
+
+**What to tune when:**
+
+| Symptom | Action |
+|---------|--------|
+| Drops on Tidal / Qobuz via LMS | Raise `--pcm-buffer-seconds` (default 0.5 s → 1-2 s) and `--pcm-prefill-ms` |
+| Too long a delay before sound starts | Reduce `--pcm-prefill-ms` (default 80 ms) |
+| Underruns at DSD512+ | Raise `--dsd-buffer-seconds` (default 0.8 s) |
+| Generic socket buffer ceilings | Set once via your distribution's sysctl tuning, then forget |
+
+The buffer at stage ④ (`DirettaRingBuffer`) is what really matters for the audiophile experience. Everything else either self-regulates or gets set once and left alone.
 
 ### Configuration File (/etc/default/slim2diretta)
 
