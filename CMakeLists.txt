@@ -15,7 +15,7 @@ if(DEFINED ENV{LLVM} OR DEFINED LLVM)
     set(USE_LLD    ON CACHE BOOL "Use lld linker with clang"     FORCE)
 endif()
 
-project(slim2diretta VERSION 1.3.1)
+project(slim2diretta VERSION 1.3.2)
 
 set(CMAKE_CXX_STANDARD 17)
 
@@ -166,8 +166,14 @@ if(DEFINED ENV{DIRETTA_SDK_PATH})
     set(SDK_PATH $ENV{DIRETTA_SDK_PATH})
     message(STATUS "Using SDK from environment: ${SDK_PATH}")
 else()
-    # Search in common locations (SDK 148 preferred, then 147)
+    # Search in common locations (newest first: 149, 148, 147)
     set(SDK_SEARCH_PATHS
+        "$ENV{HOME}/DirettaHostSDK_149"
+        "${CMAKE_SOURCE_DIR}/DirettaHostSDK_149"
+        "${CMAKE_SOURCE_DIR}/../DirettaHostSDK_149"
+        "/opt/DirettaHostSDK_149"
+        "$ENV{HOME}/audio/DirettaHostSDK_149"
+        "/usr/local/DirettaHostSDK_149"
         "$ENV{HOME}/DirettaHostSDK_148"
         "${CMAKE_SOURCE_DIR}/DirettaHostSDK_148"
         "${CMAKE_SOURCE_DIR}/../DirettaHostSDK_148"
@@ -265,10 +271,22 @@ if(NOT EXISTS "${SDK_LIB_ACQUA}")
     message(WARNING "ACQUA library not found: ${ACQUA_LIB_NAME}")
 endif()
 
-# Check for SDK headers (SDK 148 uses different path than 147)
+# Check for SDK headers and extract the actual release number from
+# Host/Release.hpp when present (supports 148, 149, and any future
+# release that keeps the same header layout).
 if(EXISTS "${SDK_PATH}/Host/Sync.hpp")
-    message(STATUS "SDK 148 headers detected")
-    set(SDK_VERSION "148")
+    if(EXISTS "${SDK_PATH}/Host/Release.hpp")
+        file(READ "${SDK_PATH}/Host/Release.hpp" _RELEASE_HPP)
+        string(REGEX MATCH "ReleaseNo[ \t]*=[ \t]*([0-9]+)" _ "${_RELEASE_HPP}")
+        if(CMAKE_MATCH_1)
+            set(SDK_VERSION "${CMAKE_MATCH_1}")
+        else()
+            set(SDK_VERSION "148+")
+        endif()
+    else()
+        set(SDK_VERSION "148+")
+    endif()
+    message(STATUS "SDK ${SDK_VERSION} headers detected")
 elseif(EXISTS "${SDK_PATH}/Host/Diretta/SyncBuffer")
     message(STATUS "SDK 147 headers detected")
     set(SDK_VERSION "147")
