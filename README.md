@@ -1,4 +1,4 @@
-# slim2diretta v1.3.1
+# slim2diretta v1.3.2
 
 **Native LMS Player with Diretta Output - Mono-Process Architecture**
 
@@ -234,7 +234,7 @@ If a new release introduces a new optional dependency (e.g. a new codec or the F
 ```bash
 # 1. Download Diretta Host SDK first
 #    Visit: https://www.diretta.link/hostsdk.html
-#    Extract to: ~/DirettaHostSDK_148
+#    Extract to: ~/DirettaHostSDK_149  (or latest version — auto-detected)
 
 # 2. Clone repository
 git clone https://github.com/cometdom/slim2diretta.git
@@ -330,10 +330,10 @@ sudo pacman -S ffmpeg
 #### 2. Download Diretta Host SDK
 
 1. Visit [diretta.link](https://www.diretta.link/hostsdk.html)
-2. Download **DirettaHostSDK_148** (or latest version)
+2. Download **DirettaHostSDK_149** (or latest version — slim2diretta auto-detects 149, 148, and 147)
 3. Extract to one of these locations:
-   - `~/DirettaHostSDK_148`
-   - `/opt/DirettaHostSDK_148`
+   - `~/DirettaHostSDK_149`
+   - `/opt/DirettaHostSDK_149`
    - Or set `DIRETTA_SDK_PATH` environment variable
 
 #### 3. Clone and Build
@@ -967,4 +967,4 @@ This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) 
 
 **Enjoy native DSD and hi-res PCM streaming from your LMS library!**
 
-*Last updated: 2026-05-03 (v1.3.1)*
+*Last updated: 2026-05-04 (v1.3.2)*

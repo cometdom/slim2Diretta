@@ -58,7 +58,7 @@ if ! git diff-index --quiet HEAD --; then
 fi
 
 # --- Extract version from CMakeLists.txt -----------------------------------
-# Pattern: project(slim2diretta VERSION 1.3.1)
+# Pattern: project(slim2diretta VERSION 1.3.2)
 
 VERSION=$(grep -oP 'project\(slim2diretta VERSION \K[0-9]+\.[0-9]+\.[0-9]+' "$VERSION_FILE" || true)
 if [ -z "${VERSION:-}" ]; then
@@ -68,7 +68,7 @@ fi
 TAG="v${VERSION}"
 
 # --- Verify CHANGELOG has a section for this version -----------------------
-# slim2diretta uses: ## v1.3.1 (2026-05-03)
+# slim2diretta uses: ## v1.3.2 (2026-05-04)
 
 if ! grep -qE "^## v${VERSION} \(" CHANGELOG.md; then
     echo "ERROR: CHANGELOG.md has no '## v${VERSION} (YYYY-MM-DD)' section." >&2
