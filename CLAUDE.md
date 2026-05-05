@@ -22,7 +22,7 @@ cmake -DARCH_NAME=aarch64-linux-15 ..     # Raspberry Pi 4
 cmake -DARCH_NAME=aarch64-linux-15k16 ..  # Raspberry Pi 5 (16KB pages)
 
 # Custom SDK path
-export DIRETTA_SDK_PATH=/path/to/DirettaHostSDK_148
+export DIRETTA_SDK_PATH=/path/to/DirettaHostSDK_149
 cmake ..
 
 # Clang + LTO (recommended for best audio quality)
@@ -141,18 +141,18 @@ Key messages: HELO (registration), STAT (status), strm (stream control), audg (v
 
 ## Dependencies
 
-- **Diretta Host SDK v147 or v148** (proprietary, not committed, personal use)
+- **Diretta Host SDK v147, v148, or v149** (proprietary, not committed, personal use). Auto-detected at CMake configure time via `Host/Release.hpp` parsing — newer releases that preserve the same header layout will be picked up automatically.
 - **libFLAC** (BSD-3-Clause) for FLAC decoding
 - **POSIX threads** (pthreads)
 - **C++17 runtime**
 - **Optional**: libmpg123 (MP3), libvorbis (Ogg), fdk-aac (AAC)
 - **Optional**: libavcodec + libavutil (FFmpeg decoder backend, `--decoder ffmpeg`)
 
-SDK locations searched (in order):
+SDK locations searched (in order, newest version preferred):
 1. `$DIRETTA_SDK_PATH`
-2. `~/DirettaHostSDK_148` or `~/DirettaHostSDK_147`
-3. `./DirettaHostSDK_148` or `./DirettaHostSDK_147`
-4. `/opt/DirettaHostSDK_148` or `/opt/DirettaHostSDK_147`
+2. `~/DirettaHostSDK_149`, `~/DirettaHostSDK_148`, `~/DirettaHostSDK_147`
+3. `./DirettaHostSDK_149`, `./DirettaHostSDK_148`, `./DirettaHostSDK_147`
+4. `/opt/DirettaHostSDK_149`, `/opt/DirettaHostSDK_148`, `/opt/DirettaHostSDK_147`
 
 
 ## Audio Push Strategy

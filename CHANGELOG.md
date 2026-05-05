@@ -2,6 +2,12 @@
 
 All notable changes to slim2diretta are documented in this file.
 
+## v1.3.2 (2026-05-05)
+
+### Changed
+
+- **Diretta Host SDK 149 support**: Added `DirettaHostSDK_149` paths to the CMake auto-detection list (149 is preferred over 148, then 147 as fallback) and reworked the SDK version detection to parse `Host/Release.hpp` instead of hard-coding "148" / "147". The build now reports the actual `ReleaseNo` from the SDK headers (e.g. `SDK 149 headers detected`) and will keep working transparently with future SDK releases that preserve the same header layout. **No source code change was required** — the API differences in 149 (new `MACtype` enum, breaking signatures on `Connection` / `Find` 2-arg constructor / `sendMulti`, additive `clearExtFormat()`) do not impact the patterns used by slim2diretta, which constructs `DIRETTA::Find` via the unchanged 1-arg overload and never instantiates `Connection` directly.
+
 ## v1.3.1 (2026-05-03)
 
 ### Added
