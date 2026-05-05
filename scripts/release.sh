@@ -68,7 +68,7 @@ fi
 TAG="v${VERSION}"
 
 # --- Verify CHANGELOG has a section for this version -----------------------
-# slim2diretta uses: ## v1.3.2 (2026-05-04)
+# slim2diretta uses: ## v1.3.2 (2026-05-05)
 
 if ! grep -qE "^## v${VERSION} \(" CHANGELOG.md; then
     echo "ERROR: CHANGELOG.md has no '## v${VERSION} (YYYY-MM-DD)' section." >&2
