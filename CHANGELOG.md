@@ -2,6 +2,12 @@
 
 All notable changes to slim2diretta are documented in this file.
 
+## v1.3.3 (2026-05-06)
+
+### Added
+
+- **`--cpu-decode` option** (mirrored from DirettaRendererUPnP v2.4.2 PR #68 by Daniel/Koala887): a third CPU-affinity granularity that pins the audio/decode thread (HTTP receive → decode → push to ring buffer) to its own dedicated core, separate from the Diretta SDK worker (`--cpu-audio`) and from the lighter main + slimproto threads (`--cpu-other`). When `--cpu-decode` is set, the audio/decode thread is also raised to `SCHED_FIFO` real-time priority (using `RT_PRIORITY`), since the dedicated core makes that safe. Falls back to `--cpu-other` when `--cpu-decode` is empty (no behavioural change for existing setups). Also exposed in the web UI (full and minimal profiles) under "CPU Affinity" as "Decode Core(s)". This brings slim2diretta in line with the same three-tier model now available in DirettaRendererUPnP.
+
 ## v1.3.2 (2026-05-05)
 
 ### Changed

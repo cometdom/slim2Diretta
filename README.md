@@ -1,4 +1,4 @@
-# slim2diretta v1.3.2
+# slim2diretta v1.3.3
 
 **Native LMS Player with Diretta Output - Mono-Process Architecture**
 
@@ -8,7 +8,7 @@
 
 ---
 
-![Version](https://img.shields.io/badge/version-1.3.0-blue.svg)
+![Version](https://img.shields.io/badge/version-1.3.3-blue.svg)
 ![DSD](https://img.shields.io/badge/DSD-Native-green.svg)
 ![SDK](https://img.shields.io/badge/SDK-DIRETTA::Sync-orange.svg)
 
@@ -162,7 +162,7 @@ Both produce lossless output; the sonic difference is subtle and comes from inte
 - **Multi-chunk push** (2048-frame chunks) at high sample rates, event-based flow control
 - **Clean-room Slimproto** implementation from public documentation — no GPL code copied
 - **Roon compatibility** via Slimproto/Squeezebox mode with DoP passthrough
-- **Optional CPU affinity** (`--cpu-audio`, `--cpu-other`) and clang+LTO build for minimum jitter
+- **Optional CPU affinity** (`--cpu-audio`, `--cpu-decode`, `--cpu-other`) and clang+LTO build for minimum jitter
 
 ---
 
@@ -538,7 +538,8 @@ Diretta Advanced Options:
 
 CPU Affinity (optional, accepts single core or comma-separated list):
   --cpu-audio <core[,core...]>   Pin SDK worker + Diretta hot path to core(s)
-  --cpu-other <core[,core...]>   Pin audio/decode/slimproto threads to core(s)
+  --cpu-decode <core[,core...]>  Pin audio/decode thread to core(s); also raises SCHED_FIFO (v1.3.3+)
+  --cpu-other <core[,core...]>   Pin main + slimproto threads to core(s)
 
 Buffer Configuration (0/empty = use defaults):
   --pcm-buffer-seconds <s>       PCM buffer size in seconds (default 0.5)
@@ -549,19 +550,20 @@ Buffer Configuration (0/empty = use defaults):
 
 ### CPU Affinity (Thread Pinning)
 
-`--cpu-audio` and `--cpu-other` pin specific threads to dedicated CPU cores to reduce jitter and improve real-time performance. This is particularly beneficial on systems with CPU isolation (`isolcpus` kernel parameter).
+Three options pin specific threads to dedicated CPU cores to reduce jitter and improve real-time performance. Particularly beneficial on systems with CPU isolation (`isolcpus` kernel parameter).
 
 - `--cpu-audio <core[,core...]>`: pins the Diretta SDK worker thread (the hot path that sends packets to the target) to the specified core(s). Automatically enables the SDK `OCCUPIED` thread mode flag (bit 16). The SDK itself receives only the first core of the list.
-- `--cpu-other <core[,core...]>`: pins the audio/decode thread (HTTP reader + decoder + ring buffer push) and the Slimproto TCP receive thread to the specified core(s).
+- `--cpu-decode <core[,core...]>` (v1.3.3+): pins the audio/decode thread (HTTP receive + decoder + ring buffer push) to the specified core(s). When set, that thread is also raised to `SCHED_FIFO` real-time priority (using `RT_PRIORITY`), since a dedicated core makes that safe. If left empty, the audio/decode thread inherits `--cpu-other` instead, preserving the v1.3.2 behaviour.
+- `--cpu-other <core[,core...]>`: pins the main thread and the Slimproto TCP receive thread. Also serves as fallback for the audio/decode thread when `--cpu-decode` is empty.
 
-Both options accept either a single core or a comma-separated list. When multiple cores are provided, the kernel scheduler may move the thread within the set.
+All three options accept either a single core or a comma-separated list. When multiple cores are provided, the kernel scheduler may move the thread within the set.
 
-**Example**: on an 8-core system with cores 2 and 3 isolated via `isolcpus=2,3`:
+**Example**: on an 8-core system with cores 2-4 isolated via `isolcpus=2,3,4`:
 ```bash
-sudo slim2diretta --target 1 --cpu-audio 2 --cpu-other 3
+sudo slim2diretta --target 1 --cpu-audio 2 --cpu-decode 3 --cpu-other 4
 ```
 
-Both options also accept the value via the Web UI (CPU Affinity section).
+All three options are also configurable via the Web UI (CPU Affinity section).
 
 ### Buffer Configuration
 
@@ -967,4 +969,4 @@ This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) 
 
 **Enjoy native DSD and hi-res PCM streaming from your LMS library!**
 
-*Last updated: 2026-05-05 (v1.3.2)*
+*Last updated: 2026-05-06 (v1.3.3)*
