@@ -41,11 +41,15 @@ sudo ./slim2diretta -s <lms-ip> --target 1
 # With player name and verbose
 sudo ./slim2diretta -s <lms-ip> --target 1 -n "Living Room" -v
 
-# With CPU affinity (single core each — cores 2 and 3 isolated via isolcpus=2,3)
-sudo ./slim2diretta --target 1 --cpu-audio 2 --cpu-other 3
+# With CPU affinity (single core each — cores 2,3,4 isolated via isolcpus=2,3,4)
+sudo ./slim2diretta --target 1 --cpu-audio 2 --cpu-decode 3 --cpu-other 4
 
 # Multi-core affinity (v1.3.0+): audio thread can float between cores 2,3
 sudo ./slim2diretta --target 1 --cpu-audio 2,3 --cpu-other 4
+
+# v1.3.3+: --cpu-decode pins the audio/decode thread to its own core and
+# raises it to SCHED_FIFO. If --cpu-decode is empty, the audio/decode
+# thread inherits --cpu-other (v1.3.2 behaviour preserved).
 
 # Tune buffer sizes (v1.3.0+)
 sudo ./slim2diretta --target 1 --pcm-buffer-seconds 1.0 --dsd-buffer-seconds 1.2
@@ -66,7 +70,13 @@ LMS (network)
 
 **Threading**: main (init/signals) + slimproto (TCP LMS) + audio (HTTP->decode->push) + SDK worker (DirettaSync internal)
 
-**CPU affinity** (`--cpu-audio`, `--cpu-other`): optional thread pinning via `pthread_setaffinity_np`, default empty (no pinning). Since v1.3.0 accepts either a single core (`3`) or a comma-separated list (`3,4`). `--cpu-audio` pins the SDK worker thread and is also passed to `DIRETTA::Sync::open(cpuMain, cpuOther, ...)` — the SDK only takes a single core, so the first value from the list is used; the `OCCUPIED` flag (bit 16) is added to threadMode automatically when `cpuAudio` is non-empty. `--cpu-other` pins the main thread, the audio (HTTP→decode→push) thread, and the Slimproto receive thread. Both are exposed via CLI and Web UI (CPU Affinity group). Aligned with DirettaRendererUPnP.
+**CPU affinity** (`--cpu-audio`, `--cpu-decode`, `--cpu-other`): optional thread pinning via `pthread_setaffinity_np`, default empty (no pinning). Since v1.3.0 each option accepts either a single core (`3`) or a comma-separated list (`3,4`). Three-tier model aligned with DirettaRendererUPnP v2.4.2:
+
+- `--cpu-audio` pins the SDK worker thread and is also passed to `DIRETTA::Sync::open(cpuMain, cpuOther, ...)` — the SDK only takes a single core, so the first value from the list is used; the `OCCUPIED` flag (bit 16) is added to threadMode automatically when `cpuAudio` is non-empty.
+- `--cpu-decode` (v1.3.3+) pins the audio/decode thread (HTTP receive → decode → push to ring buffer). When set, that thread is also raised to `SCHED_FIFO` priority via `g_rtPriority`, since the dedicated core makes that safe. Falls back to `--cpu-other` when empty (preserves v1.3.2 behaviour).
+- `--cpu-other` pins the main thread and the Slimproto TCP receive thread. Also serves as fallback target for the audio/decode thread when `--cpu-decode` is empty.
+
+All three options are exposed via CLI and Web UI (CPU Affinity group, `cli_opts` config_type).
 
 **Buffer configuration** (v1.3.0+): `--pcm-buffer-seconds`, `--dsd-buffer-seconds`, `--pcm-prefill-ms`, `--dsd-prefill-ms`. Zero/empty means "use defaults" from the `DirettaBuffer` namespace. The override is applied in `configureRingPCM()`, `configureRingDSD()`, and `calculateAlignedPrefill()`. Exposed via CLI and Web UI (Buffer Configuration group).
 

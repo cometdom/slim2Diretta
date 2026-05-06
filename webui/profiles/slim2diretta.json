@@ -76,11 +76,19 @@
                     "default": ""
                 },
                 {
+                    "key": "cpu-decode",
+                    "type": "text",
+                    "cli_arg": "--cpu-decode",
+                    "label": "Decode Core(s)",
+                    "description": "Pin the audio/decode thread (HTTP receive + decode → push to ring buffer) to CPU core(s). When set, that thread is also raised to SCHED_FIFO. Single core or comma-separated list. Empty = falls back to Other Core(s).",
+                    "default": ""
+                },
+                {
                     "key": "cpu-other",
                     "type": "text",
                     "cli_arg": "--cpu-other",
                     "label": "Other Core(s)",
-                    "description": "Pin audio/decode/slimproto threads to CPU core(s). Single core or comma-separated list. Empty = no pinning.",
+                    "description": "Pin main + slimproto threads to CPU core(s). Also used as fallback for the decode thread if Decode Core(s) is empty. Single core or comma-separated list. Empty = no pinning.",
                     "default": ""
                 }
             ]

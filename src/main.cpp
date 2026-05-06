@@ -36,7 +36,7 @@
 #include <pthread.h>
 #include <sched.h>
 
-#define SLIM2DIRETTA_VERSION "1.3.2"
+#define SLIM2DIRETTA_VERSION "1.3.3"
 
 // Parse comma-separated core list (e.g. "6,7,8") into a vector of ints.
 // Returns empty vector on parse error or empty input.
@@ -58,6 +58,24 @@ static std::vector<int> parseCoreList(const std::string& spec) {
         }
     }
     return cores;
+}
+
+// Sets SCHED_FIFO real-time priority on the current thread (requires
+// CAP_SYS_NICE or root on Linux). Returns true on success, false otherwise
+// (non-fatal — the thread will run at the standard policy if it fails).
+// Used for the audio/decode thread when --cpu-decode is set: a dedicated
+// core makes RT scheduling on that thread safe and beneficial.
+static bool setRealtimePriority(int priority) {
+    struct sched_param param;
+    param.sched_priority = priority;
+    int ret = pthread_setschedparam(pthread_self(), SCHED_FIFO, &param);
+    if (ret != 0) {
+        std::cerr << "[Audio] Warning: could not set SCHED_FIFO priority "
+                  << priority << " (error " << ret << ")" << std::endl;
+        return false;
+    }
+    std::cout << "[Audio] Audio thread set to SCHED_FIFO priority " << priority << std::endl;
+    return true;
 }
 
 // Pin current thread to one or more CPU cores.
@@ -314,6 +332,29 @@ Config parseArguments(int argc, char* argv[]) {
                 }
             }
         }
+        else if (arg == "--cpu-decode" && i + 1 < argc) {
+            config.cpuDecode = argv[++i];
+            int numCores = static_cast<int>(std::thread::hardware_concurrency());
+            std::stringstream ss(config.cpuDecode);
+            std::string tok;
+            while (std::getline(ss, tok, ',')) {
+                try {
+                    int core = std::stoi(tok);
+                    if (core < 0 || core >= numCores) {
+                        std::cerr << "Warning: --cpu-decode core " << core
+                                  << " out of range [0," << (numCores - 1)
+                                  << "], ignoring" << std::endl;
+                        config.cpuDecode.clear();
+                        break;
+                    }
+                } catch (const std::exception&) {
+                    std::cerr << "Warning: invalid --cpu-decode value '"
+                              << config.cpuDecode << "', ignoring" << std::endl;
+                    config.cpuDecode.clear();
+                    break;
+                }
+            }
+        }
         else if (arg == "--cpu-other" && i + 1 < argc) {
             config.cpuOther = argv[++i];
             int numCores = static_cast<int>(std::thread::hardware_concurrency());
@@ -390,7 +431,8 @@ Config parseArguments(int argc, char* argv[]) {
                       << "\n"
                       << "CPU Affinity (optional, empty = no pinning):\n"
                       << "  --cpu-audio <core[,core...]>   Pin SDK worker + Diretta hot path to core(s)\n"
-                      << "  --cpu-other <core[,core...]>   Pin audio/decode/slimproto threads to core(s)\n"
+                      << "  --cpu-decode <core[,core...]>  Pin audio/decode thread (HTTP→decode→push) to core(s); also raises that thread to SCHED_FIFO\n"
+                      << "  --cpu-other <core[,core...]>   Pin main + slimproto threads to core(s)\n"
                       << "\n"
                       << "Buffer configuration (0 = use defaults):\n"
                       << "  --pcm-buffer-seconds <s>       PCM buffer size in seconds (default 0.5)\n"
@@ -785,11 +827,22 @@ int main(int argc, char* argv[]) {
                 audioThreadDone.store(false, std::memory_order_release);
                 audioTestThread = std::thread([&httpStream, &slimproto, &audioTestRunning, &audioThreadDone, &hasPendingTrack, &pendingMutex, &pendingNextTrack, formatCode, pcmRate, pcmSize, pcmChannels, pcmEndian, direttaPtr, &config]() {
 
-                    // Pin audio/decode thread to cpuOther core(s) if configured
+                    // Pin the audio/decode thread (HTTP→decode→push). Prefer
+                    // --cpu-decode when set; otherwise fall back to --cpu-other
+                    // for backwards compatibility with v1.3.2 and earlier.
+                    // When --cpu-decode is used, also raise this thread to
+                    // SCHED_FIFO real-time priority — the dedicated core makes
+                    // that safe.
                     {
-                        auto otherCores = parseCoreList(config.cpuOther);
-                        if (!otherCores.empty()) {
-                            pinThreadToCores(otherCores, "Audio");
+                        auto decodeCores = parseCoreList(config.cpuDecode);
+                        if (!decodeCores.empty()) {
+                            pinThreadToCores(decodeCores, "Audio");
+                            setRealtimePriority(g_rtPriority);
+                        } else {
+                            auto otherCores = parseCoreList(config.cpuOther);
+                            if (!otherCores.empty()) {
+                                pinThreadToCores(otherCores, "Audio");
+                            }
                         }
                     }
 

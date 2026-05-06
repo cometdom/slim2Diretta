@@ -29,7 +29,8 @@ struct Config {
 
     // CPU affinity (empty = no pinning). Accepts comma-separated cores: "6" or "6,7,8"
     std::string cpuAudio;               // Core(s) for SDK worker + Diretta hot path
-    std::string cpuOther;               // Core(s) for audio/decode/slimproto threads
+    std::string cpuDecode;              // Core(s) for the audio/decode thread (HTTP→decode→push)
+    std::string cpuOther;               // Core(s) for main + slimproto threads
 
     // Buffer configuration (0 = use built-in defaults from DirettaSync)
     // Note: slim2Diretta receives audio from LMS locally, no remote-specific variant.
