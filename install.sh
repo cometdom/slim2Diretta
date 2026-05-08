@@ -478,6 +478,7 @@ setup_systemd_service() {
     print_header "Systemd Service Installation"
 
     local BINARY_PATH="$SCRIPT_DIR/build/slim2diretta"
+    local service_active=false
 
     # Check if binary exists
     if [ ! -f "$BINARY_PATH" ]; then
@@ -491,6 +492,13 @@ setup_systemd_service() {
     if ! confirm "Install slim2diretta as system service?" "Y"; then
         print_info "Skipping systemd service setup"
         return 0
+    fi
+
+    # Stop the service if it is currently running so the binary can be replaced
+    if systemctl is-active --quiet slim2diretta.service 2>/dev/null; then
+        service_active=true
+        print_info "Stopping slim2diretta.service..."
+        sudo systemctl stop slim2diretta.service
     fi
 
     print_info "1. Installing binary and startup script..."
@@ -551,6 +559,11 @@ setup_systemd_service() {
         print_success "Service slim2diretta enabled with target $TARGET_NUM (starts on boot)"
     fi
     SVC_NAME="slim2diretta"
+
+    if [ "$service_active" = true ]; then
+        print_info "Restarting slim2diretta.service..."
+        sudo systemctl start slim2diretta.service
+    fi
 
     echo ""
     print_success "Systemd Service Installation Complete!"
