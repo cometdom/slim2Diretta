@@ -8,6 +8,10 @@ All notable changes to slim2diretta are documented in this file.
 
 - **`--cpu-decode` option** (mirrored from DirettaRendererUPnP v2.4.2 PR #68 by Daniel/Koala887): a third CPU-affinity granularity that pins the audio/decode thread (HTTP receive → decode → push to ring buffer) to its own dedicated core, separate from the Diretta SDK worker (`--cpu-audio`) and from the lighter main + slimproto threads (`--cpu-other`). When `--cpu-decode` is set, the audio/decode thread is also raised to `SCHED_FIFO` real-time priority (using `RT_PRIORITY`), since the dedicated core makes that safe. Falls back to `--cpu-other` when `--cpu-decode` is empty (no behavioural change for existing setups). Also exposed in the web UI (full and minimal profiles) under "CPU Affinity" as "Decode Core(s)". This brings slim2diretta in line with the same three-tier model now available in DirettaRendererUPnP.
 
+### Fixed
+
+- **Install script: stop service before replacing binary** (mirrored from DirettaRendererUPnP PR #69 by Daniel/Koala887): `install.sh` now detects whether `slim2diretta.service` is currently running, stops it before copying the new binary into `$INSTALL_BIN`, and restarts it once the install completes. Same root cause as the DRUP fix — `cp` cannot overwrite a file held open by systemd, so reinstalling on top of a running service silently left the old binary in place until the next reboot.
+
 ## v1.3.2 (2026-05-05)
 
 ### Changed
