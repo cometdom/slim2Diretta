@@ -70,6 +70,8 @@ LMS (network)
 
 **Threading**: main (init/signals) + slimproto (TCP LMS) + audio (HTTP->decode->push) + SDK worker (DirettaSync internal)
 
+**Memory locking** (v1.4.0+): `main()` calls `mlockall(MCL_CURRENT | MCL_FUTURE)` once it's past the immediate-exit cases and before any thread is created. All current and future process pages are pinned in RAM for the lifetime of the binary — closes the last non-deterministic stall source (page fault from swap, cache eviction, or zero-fill on first write) that SCHED_FIFO + CPU pinning + isolcpus cannot prevent on their own. Same discipline as JACK / PipeWire in RT mode. Requires `CAP_IPC_LOCK` and `LimitMEMLOCK=infinity` — both satisfied by `slim2diretta.service` (root + the limit is set). On `EPERM` a `LOG_WARN` is emitted and the binary continues.
+
 **CPU affinity** (`--cpu-audio`, `--cpu-decode`, `--cpu-other`): optional thread pinning via `pthread_setaffinity_np`, default empty (no pinning). Since v1.3.0 each option accepts either a single core (`3`) or a comma-separated list (`3,4`). Three-tier model aligned with DirettaRendererUPnP v2.4.2:
 
 - `--cpu-audio` pins the SDK worker thread and is also passed to `DIRETTA::Sync::open(cpuMain, cpuOther, ...)` — the SDK only takes a single core, so the first value from the list is used; the `OCCUPIED` flag (bit 16) is added to threadMode automatically when `cpuAudio` is non-empty.
