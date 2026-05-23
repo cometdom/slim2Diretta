@@ -829,6 +829,19 @@ sudo kill -USR1 $(pgrep -f "slim2diretta.*--target 1")
 sudo journalctl -u slim2diretta@1 -n 20
 ```
 
+### Memory Locking (mlockall)
+
+As of **v1.4.0**, the binary calls `mlockall(MCL_CURRENT | MCL_FUTURE)` at startup so no page of the process can be swapped out, evicted from the page cache, or page-fault on the audio path. Same memory-locking discipline JACK and PipeWire use in RT mode. On success the journal shows `Memory locked in RAM (mlockall MCL_CURRENT|MCL_FUTURE)`.
+
+**Running as root** (the default for the shipped systemd unit): works out of the box — root has `CAP_IPC_LOCK`, which makes `RLIMIT_MEMLOCK` irrelevant. The shipped unit also sets `LimitMEMLOCK=infinity` as belt-and-braces.
+
+**Other deployments — non-root user, custom init system, or restricted launcher** (downstream packagers please note): grant `CAP_IPC_LOCK` and raise the memory-lock limit.
+
+- **systemd** (e.g. AudioLinux, generic distros): set `LimitMEMLOCK=infinity` and add `CAP_IPC_LOCK` to `AmbientCapabilities` (and to `CapabilityBoundingSet` if you restrict the bounding set).
+- **OpenRC** (e.g. GentooPlayer): set `rc_ulimit="-l unlimited"` for the memory-lock limit; for the capability, either run as root, `setcap cap_ipc_lock+ep /usr/local/bin/slim2diretta`, or `start-stop-daemon --capabilities CAP_IPC_LOCK ...`.
+
+On `EPERM` (e.g. CLI run as an unprivileged user without setcap), the binary emits a `LOG_WARN` and continues with no behavioural regression versus earlier releases — only the memory-locking benefit is lost.
+
 ---
 
 ## Internet Radio Support
