@@ -29,12 +29,14 @@
 #include <sstream>
 
 #include <sys/socket.h>
+#include <sys/mman.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <poll.h>
 #include <pthread.h>
 #include <sched.h>
+#include <cerrno>
 
 #define SLIM2DIRETTA_VERSION "1.3.3"
 
@@ -624,6 +626,17 @@ int main(int argc, char* argv[]) {
         std::cerr << "Use --list-targets to see available targets" << std::endl;
         shutdownAsyncLogging();
         return 1;
+    }
+
+    // Lock all process memory in RAM (current + future allocations) so no
+    // page fault can ever interrupt the audio thread. Standard for RT audio
+    // (JACK, PipeWire). Requires CAP_IPC_LOCK (running as root suffices) and
+    // LimitMEMLOCK=infinity in the systemd unit (already set).
+    if (mlockall(MCL_CURRENT | MCL_FUTURE) != 0) {
+        LOG_WARN("mlockall failed (" << std::strerror(errno) << ") — running "
+                 "without memory locking; expect possible page-fault jitter");
+    } else {
+        LOG_INFO("Memory locked in RAM (mlockall MCL_CURRENT|MCL_FUTURE)");
     }
 
     // Print configuration
