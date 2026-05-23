@@ -2,6 +2,12 @@
 
 All notable changes to slim2diretta are documented in this file.
 
+## v1.4.0 (2026-05-23)
+
+### Added
+
+- **`mlockall` at startup**: slim2diretta now calls `mlockall(MCL_CURRENT | MCL_FUTURE)` early in `main()` (just past the immediate-exit cases `--version` / `--list-targets`, before any DirettaSync setup or thread creation). All of the process's pages — code, heap, stack, and every page allocated thereafter — are locked into RAM for the lifetime of the process. No page of slim2diretta can be swapped out, evicted from the page cache, or trigger a major/minor page fault that would otherwise stall the audio thread despite SCHED_FIFO + CPU pinning + isolcpus. This is the same memory-locking discipline JACK and PipeWire perform in RT mode, and it closes the last non-deterministic source of stalls (memory pressure / cache reclaim) for a CONFIG_PREEMPT_RT + isolated-CPU host. Requires `CAP_IPC_LOCK` (running as root via the systemd unit suffices) and `LimitMEMLOCK=infinity` in `slim2diretta.service` — both already in place since v1.0. On `EPERM` (e.g. CLI run without privileges), a `LOG_WARN` is emitted and the binary continues; no behavioural change otherwise. RSS becomes a hard floor for the process — on this binary that's a few MiB and entirely negligible on any host running slim2diretta. The "Memory locked in RAM (mlockall MCL_CURRENT|MCL_FUTURE)" line is visible in the journal on every successful startup.
+
 ## v1.3.3 (2026-05-08)
 
 ### Added
