@@ -178,7 +178,10 @@ install_optional_codecs() {
                 pkgs="$pkgs ffmpeg-free-devel"
             fi
             print_info "Installing: $pkgs"
-            sudo dnf install -y $pkgs
+            # --allowerasing lets dnf retire conflicting FFmpeg packages
+            # (e.g. ffmpeg-devel from RPM Fusion already installed) when the
+            # user picks ffmpeg-free-devel, or vice-versa on a re-run.
+            sudo dnf install -y --allowerasing $pkgs
             ;;
         ubuntu|debian)
             local pkgs=""
