@@ -2,6 +2,14 @@
 
 All notable changes to slim2diretta are documented in this file.
 
+## v1.4.1 (2026-06-04)
+
+### Changed
+
+- **`install.sh`: `--allowerasing` on the optional codec / FFmpeg `dnf install`**. Small UX improvement, no functional change to the slim2diretta binary itself. Fedora ships `ffmpeg-free` / `ffmpeg-free-devel` by default; users who have switched to `ffmpeg` / `ffmpeg-devel` from RPM Fusion (or vice-versa) used to hit a "conflicting requests" error when re-running `install.sh` with the codec install option enabled. `dnf` can now retire the conflicting package on its own, making the optional-codec step idempotent across FFmpeg flavours. Mirrors the equivalent change in DirettaRendererUPnP v2.5.2.
+
+---
+
 ## v1.4.0 (2026-05-23)
 
 ### Added
