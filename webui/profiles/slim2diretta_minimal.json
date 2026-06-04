@@ -73,7 +73,8 @@
                     "cli_arg": "--cpu-audio",
                     "label": "Audio Core(s)",
                     "description": "Pin SDK worker + Diretta hot path to CPU core(s). Single core (e.g. '3') or comma-separated list (e.g. '3,4'). Empty = no pinning.",
-                    "default": ""
+                    "default": "",
+                    "normalize": "comma_list"
                 },
                 {
                     "key": "cpu-decode",
@@ -81,7 +82,8 @@
                     "cli_arg": "--cpu-decode",
                     "label": "Decode Core(s)",
                     "description": "Pin the audio/decode thread (HTTP receive + decode → push to ring buffer) to CPU core(s). When set, that thread is also raised to SCHED_FIFO. Single core or comma-separated list. Empty = falls back to Other Core(s).",
-                    "default": ""
+                    "default": "",
+                    "normalize": "comma_list"
                 },
                 {
                     "key": "cpu-other",
@@ -89,7 +91,8 @@
                     "cli_arg": "--cpu-other",
                     "label": "Other Core(s)",
                     "description": "Pin main + slimproto threads to CPU core(s). Also used as fallback for the decode thread if Decode Core(s) is empty. Single core or comma-separated list. Empty = no pinning.",
-                    "default": ""
+                    "default": "",
+                    "normalize": "comma_list"
                 }
             ]
         },
