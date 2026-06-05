@@ -2,6 +2,16 @@
 
 All notable changes to slim2diretta are documented in this file.
 
+## v1.4.2 (2026-06-05)
+
+### Fixed
+
+- **Web UI: comma-separated values are canonicalised at save time** — symmetric mirror of DirettaRendererUPnP v2.5.3 (the two web UIs share an identical Python codebase). A user typing `enp1s0, enp2s0` in the web UI used to persist that literal string with the space — natural for free-text input but cosmetically inconsistent with the documented `enp1s0,enp2s0` form. The shell launcher already trims defensively per-element (`tr -d ' '`), so this was not a functional bug; IRQ pinning and CPU affinity worked the same. The fix eliminates the cosmetic divergence on disk and protects any future consumer of `/etc/default/slim2diretta` that reads the file without trimming. Applied to the five known comma-list fields: `cpu-audio`, `cpu-decode`, `cpu-other`, `IRQ_INTERFACE`, `IRQ_CPUS` (full profile); `cpu-audio`, `cpu-decode`, `cpu-other` (minimal profile — IRQ tuning belongs to the downstream distro on that flavour). Idempotent: values that are already canonical pass through unchanged, so configs only get rewritten when the user explicitly opens and saves the form.
+
+### Changed
+
+- **Profile-driven normalization machinery in the web UI save handler** — setting JSON declarations gain an optional `"normalize"` field. The currently supported rule is `comma_list` (`re.sub(r'\s*,\s*', ',', value.strip())`), but the structure is in place for any future per-field input canonicalisation. Adding a future comma-list field to either profile is one line of JSON; no Python change needed. `save_settings()` builds the rule map from the active profile once, then normalises values before splitting between the CLI-opts (`CliOptsConfig.save`) and shell-vars (`ShellVarConfig.save`) paths — so both codepaths get clean values without each having to know about the rule.
+
 ## v1.4.1 (2026-06-04)
 
 ### Changed

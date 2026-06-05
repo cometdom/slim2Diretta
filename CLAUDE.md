@@ -121,6 +121,8 @@ All three options are exposed via CLI and Web UI (CPU Affinity group, `cli_opts`
 | `webui/static/style.css` | Minimal CSS styling |
 | `webui/slim2diretta-webui.service` | Systemd service (port 8081) |
 
+**Save-time normalization** (v1.4.2+): setting JSON declarations carry an optional `"normalize"` field; `save_settings()` in `webui/diretta_webui.py` builds a `{key: rule}` map from the active profile once and canonicalises each matching value before splitting between `CliOptsConfig.save` (CLI opts → `SLIM2DIRETTA_OPTS`) and `ShellVarConfig.save` (shell vars as separate `KEY=VALUE` lines) paths. Currently the only supported rule is `comma_list` (`re.sub(r'\s*,\s*', ',', value.strip())`, idempotent, safe for empty strings and non-string values). Marked fields: `cpu-audio`, `cpu-decode`, `cpu-other`, `IRQ_INTERFACE`, `IRQ_CPUS` (full profile); `cpu-audio`, `cpu-decode`, `cpu-other` (minimal). Functionally a no-op — the shell launcher trims defensively per-element via `tr -d ' '` — but the on-disk value now matches the documented form. Symmetric to DirettaRendererUPnP v2.5.3 (the two web UIs share an identical Python codebase).
+
 **Startup & Install**:
 
 | File | Purpose |
