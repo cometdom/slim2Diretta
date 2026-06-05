@@ -38,7 +38,7 @@
 #include <sched.h>
 #include <cerrno>
 
-#define SLIM2DIRETTA_VERSION "1.4.1"
+#define SLIM2DIRETTA_VERSION "1.4.2"
 
 // Parse comma-separated core list (e.g. "6,7,8") into a vector of ints.
 // Returns empty vector on parse error or empty input.
