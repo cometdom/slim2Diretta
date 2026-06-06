@@ -2,6 +2,12 @@
 
 All notable changes to slim2diretta are documented in this file.
 
+## v1.4.3 (2026-06-06)
+
+### Fixed
+
+- **DoP: valid DoP silence at track transitions (no more crackle)** — reported by daniellyk8 (Roon + slim2diretta → licensed Diretta target, on Audiolinux). With a DoP source (Roon sends DSD as DoP over Slimproto, format code `p`), a crack/pop was intermittently audible *just before* the next track started on track change, stop, or fast-forward. Root cause: DoP is carried through the **24-bit PCM** path (`isDSD=false`, matching DirettaRendererUPnP), but the silence buffers injected at every transition — the quick-resume flush, shutdown silence, the 5 s idle release, underrun/rebuffering — were filled with plain `0x00`. For a DAC locked in DoP that is **not** valid silence: the `0x00` marker byte breaks DoP framing (markers must alternate `0x05`/`0xFA`) and `0x00` is not DSD idle (`0x69`), so the DAC briefly drops DoP lock and emits a full-scale crack. It was intermittent because the crack only occurs when a silence buffer actually reaches the DAC while it is still in DoP lock (timing-dependent). The fix makes the silence path **DoP-aware**: when the stream is DoP, `getNewStream()` now fills silence with a valid DoP idle pattern (24-bit LE packed, payload `0x69`, marker alternating `0x05`/`0xFA` per frame — exactly the form `detectDoP()` validates) instead of `0x00`. Plain PCM and native DSD paths are unchanged (PCM still uses `0x00`, native DSD still uses `0x69`), so there is no behavioural change for non-DoP playback. The DoP idle pattern is generated worker-thread-locally from the cached channel count (no shared buffer, no extra locking on the real-time path) and rebuilt only when the format changes.
+
 ## v1.4.2 (2026-06-05)
 
 ### Fixed

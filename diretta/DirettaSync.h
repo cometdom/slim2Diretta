@@ -147,6 +147,8 @@ struct AudioFormat {
     uint32_t channels = 2;
     bool isDSD = false;
     bool isCompressed = false;
+    bool isDoP = false;  // DSD-over-PCM: carried as 24-bit PCM, but silence
+                         // must be valid DoP (markers + DSD idle), not 0x00
 
     enum class DSDFormat { DSF, DFF };
     DSDFormat dsdFormat = DSDFormat::DSF;
@@ -525,7 +527,12 @@ private:
 
     void configureSinkPCM(int rate, int channels, int inputBits, int& acceptedBits);
     bool configureSinkDSD(uint32_t dsdBitRate, int channels, const AudioFormat& format);
-    void configureRingPCM(int rate, int channels, int direttaBps, int inputBps, bool isCompressed);
+    void configureRingPCM(int rate, int channels, int direttaBps, int inputBps, bool isCompressed, bool isDoP);
+
+    // Fill a stream buffer with the correct silence for the current format:
+    // plain 0x00 for PCM, or a valid DoP silence pattern (alternating
+    // 0x05/0xFA markers + 0x69 DSD idle) when m_cachedDopSilence is set.
+    void fillSilence(uint8_t* dest, int numBytes);
     void configureRingDSD(uint32_t byteRate, int channels);
     size_t calculateAlignedPrefill(size_t bytesPerSecond, size_t bytesPerBuffer,
                                    bool isDSD, bool isCompressed);
@@ -618,6 +625,7 @@ private:
     std::atomic<bool> m_need16To32Upsample{false};
     std::atomic<bool> m_need16To24Upsample{false};
     std::atomic<bool> m_isDsdMode{false};
+    std::atomic<bool> m_dopSilence{false};  // Stream is DoP — emit DoP silence, not 0x00
     std::atomic<bool> m_needDsdBitReversal{false};
     std::atomic<bool> m_needDsdByteSwap{false};  // For LITTLE endian targets
     std::atomic<bool> m_isLowBitrate{false};
@@ -653,6 +661,12 @@ private:
     int m_cachedConsumerSampleRate{44100};
     int m_cachedBytesPerFrame{0};
     uint32_t m_cachedFramesPerBufferRemainder{0};
+    // DoP silence (rebuilt in the getNewStream cold path from cached channels).
+    // Repeating unit = 2 frames × channels × 3 bytes (24-bit LE packed):
+    // [0x69][0x69][marker], marker alternating 0x05/0xFA per frame.
+    bool m_cachedDopSilence{false};
+    int m_cachedSilencePatternLen{0};
+    uint8_t m_cachedSilencePattern[64]{};
 
     // Prefill and stabilization
     size_t m_prefillTarget = 0;           // Prefill target in bytes
