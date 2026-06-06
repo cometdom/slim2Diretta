@@ -38,7 +38,7 @@
 #include <sched.h>
 #include <cerrno>
 
-#define SLIM2DIRETTA_VERSION "1.4.2"
+#define SLIM2DIRETTA_VERSION "1.4.3"
 
 // Parse comma-separated core list (e.g. "6,7,8") into a vector of ints.
 // Returns empty vector on parse error or empty input.
@@ -1326,6 +1326,9 @@ int main(int argc, char* argv[]) {
                             audioFmt.sampleRate = fmt.sampleRate;
                             audioFmt.bitDepth = (fmt.bitDepth <= 24) ? 24 : 32;
                             audioFmt.channels = fmt.channels;
+                            // Reset per track (audioFmt persists across gapless
+                            // tracks); DoP detection in PHASE 3 re-sets it.
+                            audioFmt.isDoP = false;
                             audioFmt.isCompressed = (curFormatCode == FORMAT_FLAC ||
                                                      curFormatCode == FORMAT_MP3 ||
                                                      curFormatCode == FORMAT_OGG ||
@@ -1392,6 +1395,7 @@ int main(int argc, char* argv[]) {
                                         // which also passes DoP as PCM (isDSD=false).
                                         audioFmt.isDSD = false;
                                         audioFmt.bitDepth = 24;
+                                        audioFmt.isDoP = true;  // emit DoP silence, not 0x00
                                         LOG_INFO("[Audio] DoP detected — passthrough as 24-bit PCM, "
                                             << detectedChannels << " ch, "
                                             << audioFmt.sampleRate << " Hz carrier");
