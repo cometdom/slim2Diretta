@@ -516,44 +516,70 @@ bool DirettaSync::open(const AudioFormat& format) {
                 m_consumerStateGen.fetch_add(1, std::memory_order_release);
             }
 
-            // Mirror the proven pause/unpause pattern:
-            // 1. Flush silence into pipeline
-            // 2. Stop SDK playback (prevents getNewStream calls)
-            // 3. Clear buffer (safe — no concurrent worker access)
-            // 4. Restart playback
-            // Without stop(), stale data from the previous track can leak
-            // through between the silence phase and the buffer clear.
-            {
-                int silenceCount = m_isDsdMode.load(std::memory_order_acquire) ? 30 : 10;
-                requestShutdownSilence(silenceCount);
-                auto start = std::chrono::steady_clock::now();
-                while (m_silenceBuffersRemaining.load(std::memory_order_acquire) > 0) {
-                    if (std::chrono::steady_clock::now() - start > std::chrono::milliseconds(100)) break;
-                    std::this_thread::yield();
+            if (format.isDoP) {
+                // DoP transition WITHOUT interrupting the stream (v1.4.4).
+                // A DoP DAC auto-detects DoP from the *continuous* alternating
+                // marker stream; the stop()/play() used for PCM/native DSD below
+                // would halt frame delivery for a moment → the DAC drops DoP
+                // lock → crack on resume (the manual track-change / FF / rewind
+                // crackle daniellyk8 hit). Instead, keep the SDK playing and
+                // swap the buffer under the reconfigure barrier: while
+                // m_reconfiguring is set, getNewStream() emits continuous,
+                // phase-continuous DoP silence WITHOUT touching the ring, so
+                // clear() is race-free and the marker stream never breaks.
+                beginReconfigure();
+                m_ringBuffer.clear();
+                m_prefillComplete = false;
+                m_rebuffering.store(false, std::memory_order_relaxed);
+                // m_postOnlineDelayDone stays true - DAC already stable
+                m_stabilizationCount = 0;
+                m_stopRequested = false;
+                m_draining = false;
+                m_silenceBuffersRemaining = 0;
+                endReconfigure();
+                // SDK was never stopped — it keeps streaming DoP silence.
+                m_playing = true;
+                m_paused = false;
+            } else {
+                // Mirror the proven pause/unpause pattern (PCM / native DSD):
+                // 1. Flush silence into pipeline
+                // 2. Stop SDK playback (prevents getNewStream calls)
+                // 3. Clear buffer (safe — no concurrent worker access)
+                // 4. Restart playback
+                // Without stop(), stale data from the previous track can leak
+                // through between the silence phase and the buffer clear.
+                {
+                    int silenceCount = m_isDsdMode.load(std::memory_order_acquire) ? 30 : 10;
+                    requestShutdownSilence(silenceCount);
+                    auto start = std::chrono::steady_clock::now();
+                    while (m_silenceBuffersRemaining.load(std::memory_order_acquire) > 0) {
+                        if (std::chrono::steady_clock::now() - start > std::chrono::milliseconds(100)) break;
+                        std::this_thread::yield();
+                    }
                 }
+
+                // Stop SDK playback — this is what pause does and what makes
+                // pause/unpause work reliably. Prevents getNewStream() calls
+                // so clear() has no concurrent access.
+                stop();
+
+                // Clear buffer and reset flags
+                // NOTE: Do NOT reset m_postOnlineDelayDone for quick resume!
+                // The DAC is already stable from the previous track.
+                m_ringBuffer.clear();
+                m_prefillComplete = false;
+                m_rebuffering.store(false, std::memory_order_relaxed);
+                // m_postOnlineDelayDone stays true - DAC already stable
+                m_stabilizationCount = 0;
+                m_stopRequested = false;
+                m_draining = false;
+                m_silenceBuffersRemaining = 0;
+
+                // Restart playback (like unpause does)
+                play();
+                m_playing = true;
+                m_paused = false;
             }
-
-            // Stop SDK playback — this is what pause does and what makes
-            // pause/unpause work reliably. Prevents getNewStream() calls
-            // so clear() has no concurrent access.
-            stop();
-
-            // Clear buffer and reset flags
-            // NOTE: Do NOT reset m_postOnlineDelayDone for quick resume!
-            // The DAC is already stable from the previous track.
-            m_ringBuffer.clear();
-            m_prefillComplete = false;
-            m_rebuffering.store(false, std::memory_order_relaxed);
-            // m_postOnlineDelayDone stays true - DAC already stable
-            m_stabilizationCount = 0;
-            m_stopRequested = false;
-            m_draining = false;
-            m_silenceBuffersRemaining = 0;
-
-            // Restart playback (like unpause does)
-            play();
-            m_playing = true;
-            m_paused = false;
 
             // Log MS mode on quick resume — supportMSmode is populated after first session
             if (g_logLevel >= LogLevel::DEBUG) {
@@ -1655,19 +1681,37 @@ void DirettaSync::dumpStats() const {
 // DIRETTA::Sync Overrides
 //=============================================================================
 
+void DirettaSync::writeDopMarkers(uint8_t* dest, int numBytes, bool fillPayload) {
+    // Output is 24-bit LE packed: each sample is [DSD_lo][DSD_hi][marker(MSB)].
+    // A DoP frame is `channels` consecutive samples that share one marker; the
+    // marker alternates 0x05/0xFA frame to frame. bytesPerFrame = channels*3.
+    const int bytesPerFrame = m_cachedBytesPerFrame;
+    if (bytesPerFrame < 3 || numBytes < bytesPerFrame) return;
+    const int channels = bytesPerFrame / 3;
+    int parity = m_dopMarkerParity;
+    int idx = 0;
+    for (; idx + bytesPerFrame <= numBytes; ) {
+        const uint8_t marker = parity ? 0xFA : 0x05;
+        for (int c = 0; c < channels; ++c) {
+            if (fillPayload) {
+                dest[idx]     = 0x69;  // DSD idle (low)
+                dest[idx + 1] = 0x69;  // DSD idle (high)
+            }
+            dest[idx + 2] = marker;    // DoP marker
+            idx += 3;
+        }
+        parity ^= 1;
+    }
+    m_dopMarkerParity = parity;
+}
+
 void DirettaSync::fillSilence(uint8_t* dest, int numBytes) {
     if (numBytes <= 0) return;
-    // DoP: tile the marker/idle pattern so the DAC stays locked in DoP and hears
-    // true silence. Plain 0x00 would break DoP framing → full-scale crack.
-    if (m_cachedDopSilence && m_cachedSilencePatternLen > 0) {
-        const int plen = m_cachedSilencePatternLen;
-        int i = 0;
-        while (i < numBytes) {
-            int chunk = numBytes - i;
-            if (chunk > plen) chunk = plen;
-            std::memcpy(dest + i, m_cachedSilencePattern, chunk);
-            i += chunk;
-        }
+    // DoP: emit phase-continuous DoP silence (0x69 idle + alternating markers)
+    // so the DAC stays locked in DoP and hears true silence. Plain 0x00 would
+    // break DoP framing → full-scale crack.
+    if (m_cachedDopSilence) {
+        writeDopMarkers(dest, numBytes, /*fillPayload=*/true);
         return;
     }
     std::memset(dest, m_cachedSilenceByte, numBytes);
@@ -1694,34 +1738,10 @@ bool DirettaSync::getNewStream(diretta_stream& baseStream) {
         m_cachedBytesPerFrame = m_bytesPerFrame.load(std::memory_order_acquire);
         m_cachedFramesPerBufferRemainder = m_framesPerBufferRemainder.load(std::memory_order_acquire);
 
-        // DoP silence pattern: rebuilt here (worker-thread-local, no shared
-        // buffer) from the cached channel count. Output is 24-bit LE packed
-        // (low,mid,high) — the high byte carries the DoP marker. DSD idle = 0x69
-        // (same convention as the native DSD silence fill). Marker alternates
-        // 0x05/0xFA per frame, shared across channels — exactly the form
-        // detectDoP() validates. Two frames make up the repeating unit.
+        // DoP mode: drives both the silence fill and the per-frame marker
+        // rewrite (writeDopMarkers), which use the consumer-cached
+        // m_cachedBytesPerFrame (= channels × 3) to walk frames.
         m_cachedDopSilence = m_dopSilence.load(std::memory_order_acquire);
-        if (m_cachedDopSilence) {
-            int ch = m_channels.load(std::memory_order_acquire);
-            if (ch < 1) ch = 2;
-            int unit = ch * 2 * 3;  // 2 frames × channels × 3 bytes
-            if (unit > static_cast<int>(sizeof(m_cachedSilencePattern))) {
-                ch = static_cast<int>(sizeof(m_cachedSilencePattern)) / (2 * 3);
-                unit = ch * 2 * 3;
-            }
-            int idx = 0;
-            const uint8_t markers[2] = { 0x05, 0xFA };
-            for (int f = 0; f < 2; ++f) {
-                for (int c = 0; c < ch; ++c) {
-                    m_cachedSilencePattern[idx++] = 0x69;        // DSD idle (low)
-                    m_cachedSilencePattern[idx++] = 0x69;        // DSD idle (high)
-                    m_cachedSilencePattern[idx++] = markers[f];  // DoP marker (MSB)
-                }
-            }
-            m_cachedSilencePatternLen = unit;
-        } else {
-            m_cachedSilencePatternLen = 0;
-        }
 
         m_cachedConsumerGen = gen;
     }
@@ -1886,6 +1906,14 @@ bool DirettaSync::getNewStream(diretta_stream& baseStream) {
 
     // Pop from ring buffer
     m_ringBuffer.pop(dest, currentBytesPerBuffer);
+
+    // DoP: rewrite each frame's marker to continue the alternating 0x05/0xFA
+    // sequence shared with the silence path (payload preserved). Keeps the
+    // marker stream unbroken across every silence↔audio junction so the DAC
+    // never re-triggers DoP detection (v1.4.4).
+    if (m_cachedDopSilence) {
+        writeDopMarkers(dest, currentBytesPerBuffer, /*fillPayload=*/false);
+    }
 
     // G1: Signal producer that space is now available
     // Use try_lock to avoid blocking the time-critical consumer thread

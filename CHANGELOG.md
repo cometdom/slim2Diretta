@@ -2,6 +2,14 @@
 
 All notable changes to slim2diretta are documented in this file.
 
+## v1.4.4 (2026-06-08)
+
+### Fixed
+
+- **DoP: eliminate the crackle on manual track change / fast-forward / rewind** — follow-up to v1.4.3, which made transition silence valid DoP but did **not** stop the crack (confirmed by daniellyk8 on the v1.4.3 binary). Since the silence was then byte-identical to real DoP audio yet still cracked, the cause was an **interruption of the continuous DoP stream**, not byte content. A DoP DAC auto-detects DoP from the *continuous* alternating `0x05`/`0xFA` marker stream; any break makes it drop DoP lock and re-acquire → pop. (Native DSD is immune: the Diretta layer signals "DSD" out-of-band, so the DAC never auto-detects.) Confirmed by the user: the crack happens **only** on manual stop/skip/fast-forward (which restart the stream), **never** on automatic gapless album playback (which keeps streaming) — and was much milder under LMS than Roon. Two fixes, both strictly gated behind `isDoP` (no change to PCM / native DSD):
+  1. **Transition without interrupting the stream.** The same-format quick-resume path used `stop()` → `clear()` → `play()` on every manual transition, halting frame delivery and breaking the marker stream. For DoP, the SDK is now kept running and the ring is swapped under the reconfigure barrier instead: while reconfiguring, `getNewStream()` emits continuous DoP silence without touching the ring, so `clear()` stays race-free **and** the marker stream never breaks. PCM and native DSD keep the proven `stop()/play()` sequence.
+  2. **Continuous marker phase.** Every output frame's marker byte (the 24-bit MSB) is now rewritten to a strictly alternating `0x05`/`0xFA` sequence — for **both** silence and popped audio — via a persistent parity shared across all `getNewStream` paths. This removes the one-frame marker phase break that occurred at every silence↔audio junction (the residual faint tick heard under LMS). The marker carries no audio (DSD is in the low 16 bits) and the ring stays frame-aligned (whole stereo frames from track start), so rewriting the parity of real audio is safe and bit-transparent.
+
 ## v1.4.3 (2026-06-06)
 
 ### Fixed

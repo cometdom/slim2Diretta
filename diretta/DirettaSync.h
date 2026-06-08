@@ -530,9 +530,16 @@ private:
     void configureRingPCM(int rate, int channels, int direttaBps, int inputBps, bool isCompressed, bool isDoP);
 
     // Fill a stream buffer with the correct silence for the current format:
-    // plain 0x00 for PCM, or a valid DoP silence pattern (alternating
-    // 0x05/0xFA markers + 0x69 DSD idle) when m_cachedDopSilence is set.
+    // plain 0x00 for PCM, or valid DoP silence (0x69 DSD idle + continuous
+    // alternating markers) when m_cachedDopSilence is set.
     void fillSilence(uint8_t* dest, int numBytes);
+
+    // Write the DoP marker byte (24-bit MSB) of every frame in [dest, numBytes)
+    // to the continuous alternating 0x05/0xFA sequence, advancing
+    // m_dopMarkerParity. When fillPayload is true the two DSD bytes are also set
+    // to 0x69 idle (silence); when false only the marker is rewritten (popped
+    // audio — payload preserved). numBytes must be frame-aligned.
+    void writeDopMarkers(uint8_t* dest, int numBytes, bool fillPayload);
     void configureRingDSD(uint32_t byteRate, int channels);
     size_t calculateAlignedPrefill(size_t bytesPerSecond, size_t bytesPerBuffer,
                                    bool isDSD, bool isCompressed);
@@ -661,12 +668,16 @@ private:
     int m_cachedConsumerSampleRate{44100};
     int m_cachedBytesPerFrame{0};
     uint32_t m_cachedFramesPerBufferRemainder{0};
-    // DoP silence (rebuilt in the getNewStream cold path from cached channels).
-    // Repeating unit = 2 frames × channels × 3 bytes (24-bit LE packed):
-    // [0x69][0x69][marker], marker alternating 0x05/0xFA per frame.
+    // DoP output marker continuity (v1.4.4). When the stream is DoP, every
+    // output frame's marker byte (the 24-bit MSB) is (re)written to a strictly
+    // alternating 0x05/0xFA sequence — for BOTH silence and popped audio — so
+    // the marker stream never breaks across silence↔audio junctions or buffer
+    // swaps (a phase break re-triggers the DAC's DoP detection → tick/pop).
+    // The marker carries no audio (DSD is in the low 16 bits), so rewriting the
+    // parity of real audio frames is safe. Parity persists across calls and is
+    // shared by silence + pop, kept to 0/1 to avoid any overflow.
     bool m_cachedDopSilence{false};
-    int m_cachedSilencePatternLen{0};
-    uint8_t m_cachedSilencePattern[64]{};
+    int m_dopMarkerParity{0};  // 0 → next frame 0x05, 1 → 0xFA
 
     // Prefill and stabilization
     size_t m_prefillTarget = 0;           // Prefill target in bytes

@@ -1,4 +1,4 @@
-# slim2diretta v1.4.3
+# slim2diretta v1.4.4
 
 **Native LMS Player with Diretta Output - Mono-Process Architecture**
 
@@ -133,7 +133,7 @@ Both tools share the same **DirettaSync v2.0** engine for Diretta output.
 - **FLAC**: lossless via libFLAC, all bit depths
 - **MP3 / AAC / Ogg Vorbis**: optional, for internet radio (libmpg123, fdk-aac, libvorbisfile)
 - **Native DSD**: DSF (LSB-first), DFF/DSDIFF (MSB-first), **DSD64 to DSD1024**
-- **DoP (DSD over PCM)**: auto-detected and passed through as 24-bit PCM to the Diretta Target, which forwards DoP markers to the DAC (Roon compatibility, DSD64 only). Track transitions emit valid DoP silence (alternating `0x05`/`0xFA` markers + `0x69` DSD idle), so the DAC stays in DoP lock — no crackle on track change / stop / fast-forward (v1.4.3)
+- **DoP (DSD over PCM)**: auto-detected and passed through as 24-bit PCM to the Diretta Target, which forwards DoP markers to the DAC (Roon compatibility, DSD64 only). The DoP marker stream is kept continuous across manual track changes / stop / fast-forward (the SDK is not interrupted, and marker phase is held continuous) so the DAC never drops DoP lock — no crackle on transitions (v1.4.4)
 - **Bit-perfect**: volume forced to 100%, no resampling, no processing
 
 Two decoder backends are available and can be switched at runtime:
