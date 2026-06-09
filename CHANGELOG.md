@@ -2,6 +2,16 @@
 
 All notable changes to slim2diretta are documented in this file.
 
+## v1.4.5 (2026-06-09)
+
+### Fixed
+
+- **DoP: the real fix for the manual-seek crackle (Roon), and a v1.4.4 regression** — testing of v1.4.4 (daniellyk8) showed LMS was now clean but Roon still cracked **and** playback could hang after a manual fast-forward (ring stuck at the 3035 ms prefill, needing a fresh track to recover). Root cause analysis: on a manual seek / FF / stop, Roon sends `strm-q` (→ `stopPlayback()`) then `strm-s`. `stopPlayback()` called the SDK `stop()`, which **breaks the continuous DoP marker stream before the quick-resume even runs** — so no quick-resume change could save it. That upstream stop, not the silence content, was the crack. (Automatic gapless never calls `stopPlayback()`, which is why it was always clean; LMS uses the gapless path, so LMS was unaffected. The v1.4.4 hang was its own bug: the DoP quick-resume skipped `play()`, so when the SDK *had* been stopped upstream nothing restarted it.) Fixes, all gated behind `isDoP`:
+  - **`stopPlayback()` is now DoP-aware**: for DoP it no longer stops the SDK. It discards buffered audio under the reconfigure barrier (so a later resume can't replay stale data) while keeping the SDK running, so `getNewStream()` keeps emitting continuous DoP silence and the marker stream **never breaks across a seek**. A genuine stop (no `strm-s` follows) is handled by the existing 5 s idle `release()` → `close()`, which stops the SDK cleanly (its shutdown silence is DoP-valid). The DAC therefore never drops DoP lock on manual track changes → no crack.
+  - **Quick-resume hang fixed**: the DoP fast path now restarts the SDK with `play()` only if it was actually stopped (`m_playing == false`), so it can never hang, while preserving the uninterrupted path when the SDK is still running.
+  - Retains the v1.4.4 **continuous marker phase** (`writeDopMarkers()`), which already eliminated the residual tick under LMS.
+- PCM and native DSD playback paths are unchanged.
+
 ## v1.4.4 (2026-06-08)
 
 ### Fixed

@@ -517,16 +517,27 @@ bool DirettaSync::open(const AudioFormat& format) {
             }
 
             if (format.isDoP) {
-                // DoP transition WITHOUT interrupting the stream (v1.4.4).
-                // A DoP DAC auto-detects DoP from the *continuous* alternating
-                // marker stream; the stop()/play() used for PCM/native DSD below
-                // would halt frame delivery for a moment → the DAC drops DoP
-                // lock → crack on resume (the manual track-change / FF / rewind
-                // crackle daniellyk8 hit). Instead, keep the SDK playing and
-                // swap the buffer under the reconfigure barrier: while
-                // m_reconfiguring is set, getNewStream() emits continuous,
-                // phase-continuous DoP silence WITHOUT touching the ring, so
-                // clear() is race-free and the marker stream never breaks.
+                // DoP transition that avoids breaking the marker stream when
+                // possible (v1.4.4 / refined v1.4.5). A DoP DAC auto-detects DoP
+                // from the *continuous* alternating marker stream; the
+                // stop()/play() used for PCM/native DSD below would halt frame
+                // delivery → the DAC drops DoP lock → crack on resume.
+                //
+                // Capture the SDK play state BEFORE the swap. Two cases reach
+                // here:
+                //  - Gapless-style transition: the SDK is still playing
+                //    (m_playing == true). Keep it running and swap the ring
+                //    under the reconfigure barrier — getNewStream() emits
+                //    continuous DoP silence without touching the ring, so
+                //    clear() is race-free AND the marker stream never breaks.
+                //  - Cold-start seek (e.g. Roon FF/stop→start): the player
+                //    already called stopPlayback() upstream, so the SDK is
+                //    stopped (m_playing == false). We MUST restart it with
+                //    play() here or getNewStream() is never called again and
+                //    playback hangs. (The marker stream was already broken by
+                //    that upstream stop — nothing we can do about it in this
+                //    path — but at least it doesn't hang.)
+                bool wasPlaying = m_playing.load(std::memory_order_acquire);
                 beginReconfigure();
                 m_ringBuffer.clear();
                 m_prefillComplete = false;
@@ -537,7 +548,9 @@ bool DirettaSync::open(const AudioFormat& format) {
                 m_draining = false;
                 m_silenceBuffersRemaining = 0;
                 endReconfigure();
-                // SDK was never stopped — it keeps streaming DoP silence.
+                if (!wasPlaying) {
+                    play();  // SDK was stopped upstream — restart it
+                }
                 m_playing = true;
                 m_paused = false;
             } else {
@@ -1480,6 +1493,30 @@ void DirettaSync::stopPlayback(bool immediate) {
     }
 
     if (!m_playing) return;
+
+    // DoP: do NOT stop the SDK here (v1.4.5). On a manual seek / FF / stop,
+    // Roon sends strm-q (→ this stopPlayback) then strm-s, and stopping the SDK
+    // breaks the continuous DoP marker stream → the DAC drops DoP lock → crack
+    // on resume. (Automatic gapless never reaches here, which is why it was
+    // always clean; LMS uses the gapless path, hence LMS was unaffected.)
+    // Instead, discard buffered audio under the reconfigure barrier (so a later
+    // resume doesn't replay stale data) while keeping the SDK running, so
+    // getNewStream() keeps emitting continuous DoP silence and the marker stream
+    // never breaks. A genuine stop (no strm-s follows) is handled by the
+    // existing 5 s idle release() → close(), which stops the SDK cleanly (its
+    // shutdown silence is DoP-valid too). PCM / native DSD keep the stop() path.
+    if (m_dopSilence.load(std::memory_order_acquire)) {
+        beginReconfigure();
+        m_ringBuffer.clear();
+        m_prefillComplete = false;
+        m_rebuffering.store(false, std::memory_order_relaxed);
+        m_stopRequested = false;
+        m_draining = false;
+        m_silenceBuffersRemaining = 0;
+        endReconfigure();
+        // m_playing stays true — the SDK keeps emitting DoP silence.
+        return;
+    }
 
     if (!immediate) {
         requestShutdownSilence(m_isDsdMode.load(std::memory_order_acquire) ? 50 : 20);
