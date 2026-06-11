@@ -2,6 +2,15 @@
 
 All notable changes to slim2diretta are documented in this file.
 
+## v1.4.6 (2026-06-11)
+
+### Fixed
+
+- **DoP: extend the no-interruption fix to pause/resume** — v1.4.5 fixed the crackle on manual seek / fast-forward / stop (confirmed by daniellyk8: "the Roon fast forward cracking is gone now"), but **pause then play still cracked**. Same root cause, different code path: `pausePlayback()` called the SDK `stop()` and `resumePlayback()` called `play()`, so a pause broke the continuous DoP marker stream exactly like the seek used to → the DAC dropped DoP lock → crack on resume. Now both are DoP-aware (gated behind `isDoP`, like `stopPlayback()` in v1.4.5):
+  - **`pausePlayback()`** no longer stops the SDK for DoP — it just sets the paused flag and keeps the SDK running. `getNewStream()` gained a DoP pause branch that emits continuous DoP silence (no ring pop) for the whole pause, so the DAC holds DoP lock.
+  - **`resumePlayback()`** no longer calls `play()` for DoP — the SDK was never stopped. It discards the stale paused buffer under the reconfigure barrier and lets it re-prefill; the marker stream stays continuous through the gap (DoP silence), so there is no crack.
+  - PCM / native DSD keep the existing `stop()`/`play()` pause-resume path. With this, all manual transport actions under Roon (seek, FF, stop, pause) preserve DoP lock; LMS remains clean.
+
 ## v1.4.5 (2026-06-09)
 
 ### Fixed

@@ -1,4 +1,4 @@
-# slim2diretta v1.4.5
+# slim2diretta v1.4.6
 
 **Native LMS Player with Diretta Output - Mono-Process Architecture**
 
@@ -8,7 +8,7 @@
 
 ---
 
-![Version](https://img.shields.io/badge/version-1.4.5-blue.svg)
+![Version](https://img.shields.io/badge/version-1.4.6-blue.svg)
 ![DSD](https://img.shields.io/badge/DSD-Native-green.svg)
 ![SDK](https://img.shields.io/badge/SDK-DIRETTA::Sync-orange.svg)
 
@@ -133,7 +133,7 @@ Both tools share the same **DirettaSync v2.0** engine for Diretta output.
 - **FLAC**: lossless via libFLAC, all bit depths
 - **MP3 / AAC / Ogg Vorbis**: optional, for internet radio (libmpg123, fdk-aac, libvorbisfile)
 - **Native DSD**: DSF (LSB-first), DFF/DSDIFF (MSB-first), **DSD64 to DSD1024**
-- **DoP (DSD over PCM)**: auto-detected and passed through as 24-bit PCM to the Diretta Target, which forwards DoP markers to the DAC (Roon compatibility, DSD64 only). Manual track changes / stop / fast-forward keep the DoP marker stream continuous — the SDK is not stopped on a DoP seek (it keeps emitting valid DoP silence) and marker phase is held continuous — so the DAC never drops DoP lock and there is no crackle on transitions (v1.4.5)
+- **DoP (DSD over PCM)**: auto-detected and passed through as 24-bit PCM to the Diretta Target, which forwards DoP markers to the DAC (Roon compatibility, DSD64 only). All manual transport actions — seek, fast-forward, stop, **and pause** — keep the DoP marker stream continuous (the SDK is never stopped on a DoP transition; it keeps emitting valid DoP silence, and marker phase is held continuous), so the DAC never drops DoP lock and there is no crackle on transitions (v1.4.5 / v1.4.6)
 - **Bit-perfect**: volume forced to 100%, no resampling, no processing
 
 Two decoder backends are available and can be switched at runtime:
@@ -982,4 +982,4 @@ This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) 
 
 **Enjoy native DSD and hi-res PCM streaming from your LMS library!**
 
-*Last updated: 2026-06-09 (v1.4.5)*
+*Last updated: 2026-06-11 (v1.4.6)*
