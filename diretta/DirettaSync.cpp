@@ -1536,6 +1536,17 @@ void DirettaSync::stopPlayback(bool immediate) {
 void DirettaSync::pausePlayback() {
     if (!m_playing || m_paused) return;
 
+    // DoP: do NOT stop the SDK (v1.4.6) — same reason as stopPlayback(). A pause
+    // that stops the SDK breaks the continuous DoP marker stream → crack on
+    // resume. Keep the SDK running and just flag paused; getNewStream() then
+    // emits continuous DoP silence (no pop) for the whole pause, so the DAC
+    // holds DoP lock. resumePlayback() clears the (now stale) buffer under the
+    // barrier and lets it re-prefill — the marker stream never breaks.
+    if (m_dopSilence.load(std::memory_order_acquire)) {
+        m_paused = true;
+        return;
+    }
+
     requestShutdownSilence(m_isDsdMode.load(std::memory_order_acquire) ? 30 : 10);
 
     auto start = std::chrono::steady_clock::now();
@@ -1552,6 +1563,25 @@ void DirettaSync::resumePlayback() {
     if (!m_paused) return;
 
     DIRETTA_LOG("Resuming from pause...");
+
+    // DoP: the SDK was never stopped (see pausePlayback) — do NOT call play()
+    // (that would interrupt the stream). Just discard the stale paused buffer
+    // under the reconfigure barrier and let it re-prefill; getNewStream() keeps
+    // emitting continuous DoP silence through the gap, so the DAC never drops
+    // DoP lock. Clearing m_paused last lets getNewStream resume popping.
+    if (m_dopSilence.load(std::memory_order_acquire)) {
+        m_draining = false;
+        m_stopRequested = false;
+        m_silenceBuffersRemaining = 0;
+        beginReconfigure();
+        m_ringBuffer.clear();
+        m_prefillComplete = false;
+        m_rebuffering.store(false, std::memory_order_relaxed);
+        endReconfigure();
+        m_paused = false;
+        DIRETTA_LOG("Resumed (DoP, SDK uninterrupted) - buffer cleared, re-prefilling");
+        return;
+    }
 
     // Reset flags set during pausePlayback()
     m_draining = false;
@@ -1814,6 +1844,19 @@ bool DirettaSync::getNewStream(diretta_stream& baseStream) {
 
     RingAccessGuard ringGuard(m_ringUsers, m_reconfiguring);
     if (!ringGuard.active()) {
+        fillSilence(dest, currentBytesPerBuffer);
+        m_workerActive = false;
+        return true;
+    }
+
+    // DoP pause hold (v1.4.6): for DoP, pausePlayback() does NOT stop the SDK
+    // (that would break the marker stream → crack on resume). Instead it leaves
+    // the SDK running and sets m_paused; here we emit continuous DoP silence
+    // without popping, so the DAC keeps DoP lock for the whole pause. PCM /
+    // native DSD still stop the SDK on pause, so this branch is never reached
+    // for them (getNewStream isn't called while stopped) — gated on
+    // m_cachedDopSilence for safety.
+    if (m_cachedDopSilence && m_paused.load(std::memory_order_acquire)) {
         fillSilence(dest, currentBytesPerBuffer);
         m_workerActive = false;
         return true;
