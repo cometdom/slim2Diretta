@@ -2,7 +2,11 @@
 
 All notable changes to slim2diretta are documented in this file.
 
-## v1.4.6 (2026-06-11)
+## v1.4.7 (2026-06-17)
+
+### Fixed
+
+- **Web UI: duplicate `KEY=VALUE` lines accumulating in the config on every save** — symmetric port of DirettaRendererUPnP PR #75 (by hoorna/Alfred); the two projects share a byte-identical `webui/config_parser.py`. `ShellVarConfig.save()` matched assignment lines with `^#?\s*([A-Z_][A-Z0-9_]*)=`, so a commented-out *example* line such as `#NICE_LEVEL=-10` was treated as an active setting and rewritten as active; and with no `key not in written_keys` guard, every occurrence of a key was rewritten rather than just the first — so repeated web-UI saves of the shell-var (process-priority) settings could grow duplicate active lines. The fix matches only active (uncommented) assignments, updates the first occurrence per key, drops later active duplicates, and preserves commented example lines untouched. New `webui/test_config_parser.py` adds stdlib-`unittest` regression coverage (5/5 pass, no new deps). slim2diretta's `install.sh` does not do DirettaRendererUPnP's per-key migration `sed` (it copies the shipped default wholesale with a `.bak` backup), so the second half of PR #75 (the bounded migration `sed`) does not apply here — only the `config_parser.py` fix was needed.
 
 ### Fixed
 
