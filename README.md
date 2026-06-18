@@ -1,4 +1,4 @@
-# slim2diretta v1.4.6
+# slim2diretta v1.4.7
 
 **Native LMS Player with Diretta Output - Mono-Process Architecture**
 
@@ -8,7 +8,7 @@
 
 ---
 
-![Version](https://img.shields.io/badge/version-1.4.6-blue.svg)
+![Version](https://img.shields.io/badge/version-1.4.7-blue.svg)
 ![DSD](https://img.shields.io/badge/DSD-Native-green.svg)
 ![SDK](https://img.shields.io/badge/SDK-DIRETTA::Sync-orange.svg)
 
@@ -982,4 +982,4 @@ This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) 
 
 **Enjoy native DSD and hi-res PCM streaming from your LMS library!**
 
-*Last updated: 2026-06-11 (v1.4.6)*
+*Last updated: 2026-06-18 (v1.4.7)*
