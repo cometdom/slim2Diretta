@@ -2,6 +2,13 @@
 
 All notable changes to slim2diretta are documented in this file.
 
+## v1.4.8 (2026-06-24)
+
+### Fixed
+
+- **Boot hang: Target stuck in stale idle-mode when powered on before slim2diretta** — port of DirettaRendererUPnP PR #79 (by hoorna/Alfred). When a Diretta Target has been idle for more than a few minutes before slim2diretta starts, it can enter a stuck idle-mode: it accepts the SDK connection but never reaches a streaming-capable state — LEDs blink fast indefinitely and no LMS renderer can claim it. Unlike DirettaRendererUPnP (which had a boot warmup since commit `0d1279b`), slim2diretta performed no boot pre-connect at all, so the first `open()` on the first play request would find the Target stuck. The fix adds the same boot warmup pattern: `open(PCM 44.1kHz/24-bit/2ch)` → `stopPlayback()` → `sleep(6 s)` → `release()`, giving the Target time to exit its stuck state before the first LMS play command arrives. The first real play then does a fresh cold connect. Trade-off: boot is ~6 s longer, and the first play pays a small cold-connect cost; both are acceptable vs. a renderer that cannot claim the Target at all.
+- **Version string in binary was stuck at 1.4.6** — the v1.4.7 version bump updated `CMakeLists.txt` but not `src/main.cpp`; the `--version` flag and startup log therefore still showed `1.4.6`. Fixed as part of this bump to 1.4.8.
+
 ## v1.4.7 (2026-06-17)
 
 ### Fixed
