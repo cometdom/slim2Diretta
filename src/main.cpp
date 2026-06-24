@@ -38,7 +38,7 @@
 #include <sched.h>
 #include <cerrno>
 
-#define SLIM2DIRETTA_VERSION "1.4.6"
+#define SLIM2DIRETTA_VERSION "1.4.8"
 
 // Parse comma-separated core list (e.g. "6,7,8") into a vector of ints.
 // Returns empty vector on parse error or empty input.
@@ -706,6 +706,26 @@ int main(int argc, char* argv[]) {
     DirettaSync* direttaPtr = diretta.get();  // For lambda captures
 
     std::cout << "Diretta target #" << config.direttaTarget << " enabled" << std::endl;
+
+    // Boot warmup: hold a brief SDK connection so Target can exit a stale idle-mode
+    // (firmware bug: Target idle for a few minutes before first connect gets stuck —
+    // 6-second hold followed by clean release is sufficient to unstick it).
+    {
+        AudioFormat warmupFmt;
+        warmupFmt.sampleRate = 44100;
+        warmupFmt.bitDepth = 24;
+        warmupFmt.channels = 2;
+        warmupFmt.isDSD = false;
+        LOG_INFO("[slim2diretta] Boot warmup: connecting to Target...");
+        if (direttaPtr->open(warmupFmt)) {
+            direttaPtr->stopPlayback(true);
+            std::this_thread::sleep_for(std::chrono::seconds(6));
+            direttaPtr->release();
+            LOG_INFO("[slim2diretta] Boot warmup + target reset complete");
+        } else {
+            LOG_WARN("[slim2diretta] Boot warmup pre-connect failed (non-fatal)");
+        }
+    }
 
     // Create Slimproto client and connect to LMS
     auto slimproto = std::make_unique<SlimprotoClient>();
