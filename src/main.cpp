@@ -38,7 +38,7 @@
 #include <sched.h>
 #include <cerrno>
 
-#define SLIM2DIRETTA_VERSION "1.4.8"
+#define SLIM2DIRETTA_VERSION "1.4.9"
 
 // Parse comma-separated core list (e.g. "6,7,8") into a vector of ints.
 // Returns empty vector on parse error or empty input.
@@ -1232,6 +1232,13 @@ int main(int argc, char* argv[]) {
 
                     bool httpEof = false;
                     bool stmdSent = false;  // Gapless: send STMd once on EOF
+                    // Stall safety net: if the stream connects but never yields a
+                    // decodable format within this window, LMS/the CDN has stalled
+                    // the HTTP stream (observed after rapid seeks). Bail out and let
+                    // LMS re-drive us instead of spinning here forever — which would
+                    // freeze playback until a manual service restart.
+                    constexpr int FORMAT_DETECT_TIMEOUT_MS = 10000;
+                    auto formatDetectStart = std::chrono::steady_clock::now();
                     while (audioTestRunning.load(std::memory_order_acquire) &&
                            (!httpEof || cacheFrames() > 0)) {
 
@@ -1274,6 +1281,29 @@ int main(int argc, char* argv[]) {
                                          << " bytes received)");
                             }
                             slimproto->sendStat(StatEvent::STMd);
+                        }
+
+                        // ========== Stall safety net ==========
+                        // Connected but no decodable format within the timeout →
+                        // the stream is dead (LMS/CDN stall, seen after rapid
+                        // seeks). Abort cleanly so the next strm-s cold-starts
+                        // fresh, instead of spinning forever (which freezes
+                        // playback until a manual service restart).
+                        if (!formatLogged &&
+                            std::chrono::steady_clock::now() - formatDetectStart >
+                                std::chrono::milliseconds(FORMAT_DETECT_TIMEOUT_MS)) {
+                            LOG_WARN("[Audio] Stream stalled: no decodable format within "
+                                     << (FORMAT_DETECT_TIMEOUT_MS / 1000) << "s of connect ("
+                                     << totalBytes << " bytes received) — aborting to recover");
+                            slimproto->sendStat(StatEvent::STMn);
+                            httpStream->disconnect();
+                            {
+                                std::lock_guard<std::mutex> lock(pendingMutex);
+                                pendingNextTrack.reset();
+                                hasPendingTrack.store(false, std::memory_order_release);
+                            }
+                            audioThreadDone.store(true, std::memory_order_release);
+                            return;
                         }
 
                         // ========== PHASE 1b: Drain decoder into cache ==========

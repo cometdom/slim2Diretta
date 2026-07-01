@@ -2,6 +2,12 @@
 
 All notable changes to slim2diretta are documented in this file.
 
+## v1.4.9 (2026-06-25)
+
+### Fixed
+
+- **Playback freeze after repeated rapid seeks (required a service restart)** — reported by PEETR (Roon/LMS + GentooPlayer rpi5, FLAC 96 kHz). After fast-forwarding / rewinding a few times, playback would stop and only a `slim2diretta` service restart recovered it. Root cause: the audio thread's HTTP-read / format-detection loop had **no overall timeout**. On a rapid seek, LMS occasionally leaves the new HTTP stream connected but delivers no data (`isConnected()` stays true, `readWithTimeout()` returns 0), so `httpEof` never trips and no format is ever detected — the loop spins forever waiting for data that never arrives. `open()` is never reached (no audio), and any tracks queued by subsequent seeks pile up unconsumed, so playback appears frozen. The log signature is telling: it stops right after `[HTTP] Stream connected (status 200)`, before `[FLAC] Format`. Fix: a stall safety net in the format-detection phase — if no decodable format is produced within 10 s of connecting, the thread logs a warning, sends `STMn` (so LMS knows the stream failed), disconnects the dead HTTP stream, clears any pending track, and exits cleanly. The next `strm-s` then cold-starts fresh, so the player self-recovers instead of needing a manual restart. The window is large enough never to false-trigger on normal playback (a working stream yields its format in well under a second) and only fires on a genuinely dead stream. Applies to the PCM/FLAC path (where it was reported); the native-DSD path has the same latent gap and can get the same guard later if needed.
+
 ## v1.4.8 (2026-06-24)
 
 ### Fixed

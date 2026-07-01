@@ -184,6 +184,7 @@ The audio thread (in `main.cpp`) handles HTTP reading, decoding, and ring buffer
 - **SDK prefill**: 500ms PCM (raised from 50ms in v1.2.5), 800ms compressed / 500ms uncompressed (raised from 200/100ms)
 - **Adaptive rebuffering**: 50% refill threshold after underrun (raised from 20% in v1.2.5) — more resilient recovery when Qobuz/Tidal CDN delivery stalls. High-rate streams use the same 50% threshold for ~4.2s headroom
 - **Drain loop safeguard (v1.2.5)**: Drain loop bails out when the Diretta target is no longer open (auto-released after 5s idle) to prevent 100% CPU spin. Defensive 5ms sleep on `framesWritten==0`
+- **Format-detection stall safety net (v1.4.9)**: the audio thread's HTTP-read / format-detection loop has a 10s timeout (`FORMAT_DETECT_TIMEOUT_MS`). If a stream connects but never yields a decodable format within the window (LMS/CDN leaves the HTTP stream open but sends no data — observed after rapid seeks), the thread sends `STMn`, disconnects, clears any pending track, sets `audioThreadDone`, and returns — so the next `strm-s` cold-starts fresh instead of the loop spinning forever (which previously froze playback until a manual service restart). Only guards the initial format-detection window (skipped once `formatLogged`); never false-triggers during normal playback. PCM/FLAC path only for now; the DSD path has the same latent gap.
 
 This pattern was aligned with DirettaRendererUPnP's audio engine for consistent delivery characteristics across both projects.
 
