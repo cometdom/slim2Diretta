@@ -2,6 +2,12 @@
 
 All notable changes to slim2diretta are documented in this file.
 
+## v1.4.10 (2026-07-01)
+
+### Fixed
+
+- **CPU affinity: cores silently rejected as invalid on AMD Ryzen with HT/SMT disabled** (reported by Kiran on a Ryzen 7730U running AudioLinux). `std::thread::hardware_concurrency()` returns the *count* of online CPUs (8 on a Ryzen 7730U with HT off), which slim2diretta incorrectly used as the maximum valid CPU ID. With SMT disabled, Linux takes odd-numbered logical CPUs offline and keeps even-numbered ones active (0, 2, 4, ..., 14) — so cores 10, 12, 14 are perfectly valid but were rejected as `>= 8`. The validation silently cleared `config.cpuAudio/Decode/Other`, meaning per-thread `pthread_setaffinity_np` calls were never made; only the AudioLinux cpuset slice provided coarse confinement. New `getOnlineCpus()` helper reads `/sys/devices/system/cpu/online` (e.g. `"0,2,4,6,8,10,12,14"`) and validates against actual set membership instead. Falls back to `0..N-1` if the file is unreadable (containers, older kernels). Error message now shows the real online CPU list. Same fix applied to DirettaRendererUPnP v2.5.8.
+
 ## v1.4.9 (2026-06-25)
 
 ### Fixed
