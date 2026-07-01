@@ -7,7 +7,8 @@ cmake_minimum_required(VERSION 3.10)
 # DirettaRendererUPnP's Makefile. Must be set BEFORE project() so that
 # CMake picks up the compiler override.
 # Usage: env LLVM=1 ./install.sh -b   or   LLVM=1 cmake ..
-if(DEFINED ENV{LLVM} OR DEFINED LLVM)
+set(LLVM "" CACHE STRING "LLVM=1 shortcut: use clang + LTO + lld (mirrors kernel convention)")
+if(DEFINED ENV{LLVM} OR LLVM)
     set(CMAKE_C_COMPILER   "clang"   CACHE STRING "C compiler")
     set(CMAKE_CXX_COMPILER "clang++" CACHE STRING "C++ compiler")
     # Auto-enable LTO when LLVM shortcut is used
