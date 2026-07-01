@@ -27,6 +27,8 @@
 #include <mutex>
 #include <optional>
 #include <sstream>
+#include <set>
+#include <fstream>
 
 #include <sys/socket.h>
 #include <sys/mman.h>
@@ -39,6 +41,41 @@
 #include <cerrno>
 
 #define SLIM2DIRETTA_VERSION "1.4.9"
+
+// Read /sys/devices/system/cpu/online and return the set of online CPU IDs.
+// Handles both ranges ("0-7") and lists ("0,2,4,6,8,10,12,14").
+// Falls back to 0..N-1 if the file is unreadable (containers, old kernels).
+static std::set<int> getOnlineCpus(std::string* desc = nullptr) {
+    std::set<int> online;
+    std::ifstream f("/sys/devices/system/cpu/online");
+    if (f.is_open()) {
+        std::string line;
+        std::getline(f, line);
+        while (!line.empty() && (line.back() == '\n' || line.back() == '\r' || line.back() == ' '))
+            line.pop_back();
+        if (desc) *desc = line;
+        std::stringstream ss(line);
+        std::string token;
+        while (std::getline(ss, token, ',')) {
+            auto dash = token.find('-');
+            if (dash != std::string::npos) {
+                try {
+                    int lo = std::stoi(token.substr(0, dash));
+                    int hi = std::stoi(token.substr(dash + 1));
+                    for (int i = lo; i <= hi; i++) online.insert(i);
+                } catch (...) {}
+            } else if (!token.empty()) {
+                try { online.insert(std::stoi(token)); } catch (...) {}
+            }
+        }
+        return online;
+    }
+    // Fallback: assume sequential 0..N-1
+    int n = static_cast<int>(std::thread::hardware_concurrency());
+    for (int i = 0; i < n; i++) online.insert(i);
+    if (desc) *desc = "0-" + std::to_string(n - 1);
+    return online;
+}
 
 // Parse comma-separated core list (e.g. "6,7,8") into a vector of ints.
 // Returns empty vector on parse error or empty input.
@@ -312,17 +349,17 @@ Config parseArguments(int argc, char* argv[]) {
         }
         else if (arg == "--cpu-audio" && i + 1 < argc) {
             config.cpuAudio = argv[++i];
-            // Validate: accepts comma-separated cores (e.g. "6" or "6,7,8")
-            int numCores = static_cast<int>(std::thread::hardware_concurrency());
+            std::string onlineDesc;
+            auto online = getOnlineCpus(&onlineDesc);
             std::stringstream ss(config.cpuAudio);
             std::string tok;
             while (std::getline(ss, tok, ',')) {
                 try {
                     int core = std::stoi(tok);
-                    if (core < 0 || core >= numCores) {
+                    if (core < 0 || online.find(core) == online.end()) {
                         std::cerr << "Warning: --cpu-audio core " << core
-                                  << " out of range [0," << (numCores - 1)
-                                  << "], ignoring" << std::endl;
+                                  << " not online (online CPUs: " << onlineDesc
+                                  << "), ignoring" << std::endl;
                         config.cpuAudio.clear();
                         break;
                     }
@@ -336,16 +373,17 @@ Config parseArguments(int argc, char* argv[]) {
         }
         else if (arg == "--cpu-decode" && i + 1 < argc) {
             config.cpuDecode = argv[++i];
-            int numCores = static_cast<int>(std::thread::hardware_concurrency());
+            std::string onlineDesc;
+            auto online = getOnlineCpus(&onlineDesc);
             std::stringstream ss(config.cpuDecode);
             std::string tok;
             while (std::getline(ss, tok, ',')) {
                 try {
                     int core = std::stoi(tok);
-                    if (core < 0 || core >= numCores) {
+                    if (core < 0 || online.find(core) == online.end()) {
                         std::cerr << "Warning: --cpu-decode core " << core
-                                  << " out of range [0," << (numCores - 1)
-                                  << "], ignoring" << std::endl;
+                                  << " not online (online CPUs: " << onlineDesc
+                                  << "), ignoring" << std::endl;
                         config.cpuDecode.clear();
                         break;
                     }
@@ -359,16 +397,17 @@ Config parseArguments(int argc, char* argv[]) {
         }
         else if (arg == "--cpu-other" && i + 1 < argc) {
             config.cpuOther = argv[++i];
-            int numCores = static_cast<int>(std::thread::hardware_concurrency());
+            std::string onlineDesc;
+            auto online = getOnlineCpus(&onlineDesc);
             std::stringstream ss(config.cpuOther);
             std::string tok;
             while (std::getline(ss, tok, ',')) {
                 try {
                     int core = std::stoi(tok);
-                    if (core < 0 || core >= numCores) {
+                    if (core < 0 || online.find(core) == online.end()) {
                         std::cerr << "Warning: --cpu-other core " << core
-                                  << " out of range [0," << (numCores - 1)
-                                  << "], ignoring" << std::endl;
+                                  << " not online (online CPUs: " << onlineDesc
+                                  << "), ignoring" << std::endl;
                         config.cpuOther.clear();
                         break;
                     }
