@@ -596,6 +596,16 @@ private:
     std::thread m_workerThread;
     std::mutex m_workerMutex;
     std::mutex m_configMutex;
+    // Serializes all SDK playback-control entry points (open / stopPlayback /
+    // pausePlayback / resumePlayback / startPlayback / release) so the SDK's
+    // stop()/play()/clear() are never driven by two threads at once — e.g. the
+    // Slimproto/UPnP control thread calling stopPlayback() while the audio
+    // thread is inside open(). Recursive so internal calls between these
+    // entry points (startPlayback→resumePlayback, open→close) don't self-lock.
+    // Outermost lock: m_configMutex / m_workerMutex are only taken inside it;
+    // the SDK worker and RingAccessGuard/beginReconfigure never take it, so
+    // worker joins and reconfigure barriers always complete (no deadlock).
+    std::recursive_mutex m_controlMutex;
     std::atomic<bool> m_reconfiguring{false};
     mutable std::atomic<int> m_ringUsers{0};
 

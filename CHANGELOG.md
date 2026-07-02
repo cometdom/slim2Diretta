@@ -2,6 +2,12 @@
 
 All notable changes to slim2diretta are documented in this file.
 
+## v1.4.11 (2026-07-02)
+
+### Fixed
+
+- **Playback freeze after rapid seeks — the real fix (serialize SDK control)** — the v1.4.9 format-detection timeout did **not** resolve PEETR's freeze (confirmed on v1.4.10, LMS 9.1.1 + Qobuz). Two real logs pinned the true cause. It is **not** a stalled stream — it is a **concurrency race with no serialization**: on a manual seek the `STRM_STOP` handler runs in the Slimproto thread and calls `httpStream->disconnect()` + `stopPlayback(true)` (SDK `stop()`) **while the just-started audio thread is concurrently inside `DirettaSync::open()`** doing SDK `stop()`/`clear()`/`play()`. `open()` and `stopPlayback()` shared no lock, so two threads drove the SDK control state at once → a deadlocked/stuck SDK call → the audio thread never returned → the unbounded `audioTestThread.join()` in the seek handler then froze the whole Slimproto loop (log ends on `[Seek] Waiting for audio thread to finish...`), requiring a service restart. The trigger is exactly what PEETR reported: seeks **less than ~2 s apart** (fast enough to interleave the two threads); slower seeks never froze. Fix: a `std::recursive_mutex m_controlMutex` in `DirettaSync` held by every playback-control entry point (`open`, `stopPlayback`, `pausePlayback`, `resumePlayback`, `startPlayback`, `release`), so the SDK's control state is never mutated by two threads at once — a concurrent `stopPlayback()` now waits for an in-progress `open()` instead of racing it. Recursive so internal calls between these paths don't self-lock; the control mutex is the outermost lock and the SDK worker / ring-access barriers never take it, so worker joins and reconfigure barriers always complete (no new deadlock). This lives in the shared `diretta/` layer, so it also hardens any other front-end (e.g. DirettaRendererUPnP) against the same class of concurrent-control race. The v1.4.9 format-detection timeout is retained as an independent safety net.
+
 ## v1.4.10 (2026-07-01)
 
 ### Fixed
