@@ -463,6 +463,11 @@ void DirettaSync::logSinkCapabilities() {
 //=============================================================================
 
 bool DirettaSync::open(const AudioFormat& format) {
+    // Serialize with stopPlayback/pause/resume/release so the SDK control
+    // state is never driven by two threads at once (e.g. the control thread's
+    // stopPlayback() racing this open() during rapid seeks — caused a deadlock
+    // that froze playback until a service restart).
+    std::lock_guard<std::recursive_mutex> controlLock(m_controlMutex);
 
     std::cout << "[DirettaSync] ========== OPEN ==========" << std::endl;
     std::cout << "[DirettaSync] Format: " << format.sampleRate << "Hz/"
@@ -1005,6 +1010,7 @@ void DirettaSync::close() {
 }
 
 void DirettaSync::release() {
+    std::lock_guard<std::recursive_mutex> controlLock(m_controlMutex);
     std::cout << "[DirettaSync] Release() - fully releasing target" << std::endl;
 
     // First do a normal close if still open
@@ -1471,6 +1477,7 @@ void DirettaSync::configureRingDSD(uint32_t byteRate, int channels) {
 //=============================================================================
 
 bool DirettaSync::startPlayback() {
+    std::lock_guard<std::recursive_mutex> controlLock(m_controlMutex);
     if (!m_open) return false;
     if (m_playing && !m_paused) return true;
 
@@ -1486,6 +1493,7 @@ bool DirettaSync::startPlayback() {
 }
 
 void DirettaSync::stopPlayback(bool immediate) {
+    std::lock_guard<std::recursive_mutex> controlLock(m_controlMutex);
     // Log accumulated underruns at session end
     uint32_t underruns = m_underrunCount.exchange(0, std::memory_order_relaxed);
     if (underruns > 0) {
@@ -1534,6 +1542,7 @@ void DirettaSync::stopPlayback(bool immediate) {
 }
 
 void DirettaSync::pausePlayback() {
+    std::lock_guard<std::recursive_mutex> controlLock(m_controlMutex);
     if (!m_playing || m_paused) return;
 
     // DoP: do NOT stop the SDK (v1.4.6) — same reason as stopPlayback(). A pause
@@ -1560,6 +1569,7 @@ void DirettaSync::pausePlayback() {
 }
 
 void DirettaSync::resumePlayback() {
+    std::lock_guard<std::recursive_mutex> controlLock(m_controlMutex);
     if (!m_paused) return;
 
     DIRETTA_LOG("Resuming from pause...");
