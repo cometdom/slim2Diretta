@@ -2,6 +2,12 @@
 
 All notable changes to slim2diretta are documented in this file.
 
+## v1.4.12 (2026-07-03)
+
+### Fixed
+
+- **Playback freeze after rapid seeks — the actual root cause (blocking `recv()` racing `disconnect()`)** — v1.4.11's SDK-control serialization was a real fix but did **not** stop PEETR's freeze (confirmed on v1.4.11). Two fresh logs re-pointed the diagnosis: `[DirettaSync] ========== OPEN ==========` is logged synchronously (`std::endl`, always flushed), yet the frozen audio thread never logged it → it was stuck **before `open()`**, in the HTTP-read phase, not in SDK control. Root cause: `HttpStreamClient::readRaw()` did a **blocking** `recv(m_socket, …, 0)`. It is only ever reached via `readWithTimeout()`, which already `poll()`ed the socket — but `m_socket` has no lock, so on a rapid seek the Slimproto thread's `STRM_STOP` handler calls `httpStream->disconnect()` (closes the fd) and the next `connect()` can reuse that fd number, all **between** the `poll()` and the `recv()`. The blocking `recv()` then wedges on the swapped/empty socket forever, so the audio thread never returns to check `audioTestRunning`, and the unbounded `audioTestThread.join()` in the seek handler froze the whole Slimproto loop (log ends on `[Seek] Waiting for audio thread to finish...`), requiring a service restart. This is an HTTP-socket race entirely separate from the v1.4.11 SDK-control race — both were real, but only this one caused the freeze — which is exactly why the trigger is seeks **< ~2 s apart** (the only way to hit the close/reuse window). Fix: `readRaw()` now uses `recv(…, MSG_DONTWAIT)` and treats `EAGAIN`/`EWOULDBLOCK` as "no data this tick, retry". Since `readRaw()` is reached only after a successful `poll()`, this never loses data on the normal path; it simply guarantees the call can no longer block, so the audio thread always returns promptly to observe a stop. Header reads (`getResponseHeaders()`) use a separate recv path and are unchanged. (A poll-gated read should be non-blocking regardless — the blocking `recv()` was a latent bug.)
+
 ## v1.4.11 (2026-07-02)
 
 ### Fixed

@@ -16,7 +16,7 @@ if(DEFINED ENV{LLVM} OR LLVM)
     set(USE_LLD    ON CACHE BOOL "Use lld linker with clang"     FORCE)
 endif()
 
-project(slim2diretta VERSION 1.4.11)
+project(slim2diretta VERSION 1.4.12)
 
 set(CMAKE_CXX_STANDARD 17)
 

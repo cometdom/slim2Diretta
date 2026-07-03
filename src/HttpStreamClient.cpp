@@ -109,13 +109,26 @@ bool HttpStreamClient::isConnected() const {
 ssize_t HttpStreamClient::readRaw(uint8_t* buf, size_t maxLen) {
     if (m_socket < 0) return -1;
 
-    ssize_t n = recv(m_socket, buf, maxLen, 0);
+    // Non-blocking recv: readRaw() is only ever reached via readWithTimeout(),
+    // which already poll()ed the socket for readiness, so MSG_DONTWAIT never
+    // loses data on the normal path. It is essential for correctness: on a rapid
+    // seek the control thread's disconnect() closes this fd (and the next
+    // connect() may reuse the same fd number) BETWEEN readWithTimeout()'s poll()
+    // and this recv(). A blocking recv() would then wedge on the swapped/empty
+    // socket forever — the audio thread would never return to check
+    // audioTestRunning, so the unbounded audioTestThread.join() in the seek
+    // handler froze the whole Slimproto loop (freeze requiring a service
+    // restart; only triggered by seeks <~2 s apart). MSG_DONTWAIT bounds the
+    // call: a stale/empty fd yields EAGAIN → treated as "no data this tick", the
+    // loop re-checks audioTestRunning and exits cleanly.
+    ssize_t n = recv(m_socket, buf, maxLen, MSG_DONTWAIT);
     if (n > 0) {
         return n;
     } else if (n == 0) {
         m_connected.store(false, std::memory_order_release);
         return 0;
     } else {
+        if (errno == EAGAIN || errno == EWOULDBLOCK) return 0;  // poll was stale — no data, retry
         if (errno == EINTR) return 0;
         LOG_ERROR("[HTTP] Read error: " << strerror(errno));
         m_connected.store(false, std::memory_order_release);
