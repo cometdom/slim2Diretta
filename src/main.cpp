@@ -40,7 +40,7 @@
 #include <sched.h>
 #include <cerrno>
 
-#define SLIM2DIRETTA_VERSION "1.4.12"
+#define SLIM2DIRETTA_VERSION "1.4.13"
 
 // Read /sys/devices/system/cpu/online and return the set of online CPU IDs.
 // Handles both ranges ("0-7") and lists ("0,2,4,6,8,10,12,14").
@@ -197,6 +197,114 @@ void statsSignalHandler(int /*signal*/) {
         g_diretta->dumpStats();
     }
 }
+
+// ============================================
+// Freeze watchdog (diagnostic build only, -DFREEZE_WATCHDOG)
+// ============================================
+//
+// Diagnostic instrument for the rapid-seek playback freeze (forum user PEETR).
+// A strm command handler (onStream) must return in well under a second. A
+// low-priority watcher thread tracks how long the current handler has been in
+// flight; if one is still running after WD_STALL_MS the Slimproto control loop
+// is wedged (the freeze) and we dump every thread's backtrace to stdout — the
+// same stream the normal logs use — so the user only has to send the log. No
+// gdb/SSH needed on the target. Compiled out entirely in normal builds.
+#ifdef FREEZE_WATCHDOG
+#include <execinfo.h>
+#include <sys/syscall.h>
+#include <dirent.h>
+
+static int64_t wdNowMs() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+// 0 = no Slimproto command in flight (idle, normal). Non-zero = steady-clock ms
+// at which the current onStream() handler started. Set by an RAII guard so every
+// return path clears it; a strm handler that stays set for seconds == a freeze.
+static std::atomic<int64_t> g_wdCmdSince{0};
+static std::atomic<const char*> g_wdCmdName{""};
+
+struct WdCmdGuard {
+    explicit WdCmdGuard(const char* name) {
+        g_wdCmdName.store(name, std::memory_order_release);
+        g_wdCmdSince.store(wdNowMs(), std::memory_order_release);
+    }
+    ~WdCmdGuard() { g_wdCmdSince.store(0, std::memory_order_release); }
+};
+
+static const char* wdStrmName(char c) {
+    switch (c) {
+        case STRM_START:   return "strm-s (start)";
+        case STRM_STOP:    return "strm-q (stop)";
+        case STRM_PAUSE:   return "strm-p (pause)";
+        case STRM_UNPAUSE: return "strm-u (unpause)";
+        case STRM_FLUSH:   return "strm-f (flush)";
+        default:           return "strm-? (other)";
+    }
+}
+
+// SIGUSR2 handler: dumps the *current* thread's backtrace. The watchdog raises
+// it on every thread via tgkill(). Only async-signal-safe calls in here (no
+// std::cout / printf) — raw write() + backtrace_symbols_fd(), manual int format.
+static void wdBacktraceHandler(int) {
+    void* frames[64];
+    int n = backtrace(frames, 64);
+    char hdr[48];
+    char* p = hdr;
+    for (const char* s = "\n=== thread "; *s; ) *p++ = *s++;
+    int tid = static_cast<int>(syscall(SYS_gettid));
+    char num[16];
+    int ni = 0;
+    if (tid <= 0) num[ni++] = '0';
+    else while (tid > 0) { num[ni++] = static_cast<char>('0' + tid % 10); tid /= 10; }
+    while (ni > 0) *p++ = num[--ni];
+    for (const char* s = " ===\n"; *s; ) *p++ = *s++;
+    ssize_t rc = write(STDOUT_FILENO, hdr, static_cast<size_t>(p - hdr));
+    (void)rc;
+    backtrace_symbols_fd(frames, n, STDOUT_FILENO);
+}
+
+// Walk /proc/self/task and signal each thread to dump its own backtrace. A tiny
+// sleep between signals keeps each thread's output from interleaving.
+static void wdDumpAllThreads() {
+    DIR* d = opendir("/proc/self/task");
+    if (!d) { wdBacktraceHandler(0); return; }
+    pid_t pid = getpid();
+    pid_t self = static_cast<pid_t>(syscall(SYS_gettid));
+    struct dirent* e;
+    while ((e = readdir(d)) != nullptr) {
+        if (e->d_name[0] == '.') continue;
+        pid_t tid = static_cast<pid_t>(atoi(e->d_name));
+        if (tid == self) { wdBacktraceHandler(0); continue; }
+        syscall(SYS_tgkill, pid, tid, SIGUSR2);
+        std::this_thread::sleep_for(std::chrono::milliseconds(80));
+    }
+    closedir(d);
+}
+
+static void wdWatchdogLoop(std::atomic<bool>* running) {
+    constexpr int64_t WD_STALL_MS = 4000;  // a strm handler never legitimately runs this long
+    bool dumped = false;
+    while (running->load(std::memory_order_acquire)) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        int64_t since = g_wdCmdSince.load(std::memory_order_acquire);
+        if (since == 0) { dumped = false; continue; }  // idle → re-arm
+        int64_t elapsed = wdNowMs() - since;
+        if (!dumped && elapsed > WD_STALL_MS) {
+            dumped = true;  // latch: dump once per stall episode
+            std::cout << "\n[Watchdog] Slimproto handler "
+                      << g_wdCmdName.load(std::memory_order_acquire)
+                      << " unresponsive for " << elapsed
+                      << " ms — FREEZE detected, dumping all thread backtraces"
+                      << std::endl;
+            wdDumpAllThreads();
+            std::cout << "[Watchdog] backtrace dump complete — please send this log"
+                      << std::endl;
+        }
+    }
+}
+#endif // FREEZE_WATCHDOG
 
 // ============================================
 // LMS Autodiscovery
@@ -556,6 +664,21 @@ int main(int argc, char* argv[]) {
     signal(SIGTERM, signalHandler);
     signal(SIGUSR1, statsSignalHandler);
 
+#ifdef FREEZE_WATCHDOG
+    // Diagnostic: SIGUSR2 makes each thread dump its own backtrace; the watchdog
+    // thread raises it on all threads when a Slimproto handler stalls. SA_RESTART
+    // so interrupting a stuck syscall to run the handler doesn't disturb the app.
+    // (The watcher thread itself is started later, past the immediate-exit cases,
+    // so an early `return` never leaves a joinable std::thread behind.)
+    {
+        struct sigaction sa{};
+        sa.sa_handler = wdBacktraceHandler;
+        sigemptyset(&sa.sa_mask);
+        sa.sa_flags = SA_RESTART;
+        sigaction(SIGUSR2, &sa, nullptr);
+    }
+#endif
+
     std::cout << "═══════════════════════════════════════════════════════\n"
               << "  slim2diretta v" << SLIM2DIRETTA_VERSION << "\n"
               << "  Native LMS player with Diretta output\n"
@@ -678,6 +801,14 @@ int main(int argc, char* argv[]) {
         LOG_INFO("Memory locked in RAM (mlockall MCL_CURRENT|MCL_FUTURE)");
     }
 
+#ifdef FREEZE_WATCHDOG
+    // Started here (past the immediate-exit cases) so an early return never leaves
+    // a joinable std::thread behind. Joined at final shutdown.
+    std::atomic<bool> wdRunning{true};
+    std::thread wdThread(wdWatchdogLoop, &wdRunning);
+    LOG_INFO("[Watchdog] Freeze diagnostic active (dumps thread backtraces on stall)");
+#endif
+
     // Print configuration
     std::cout << "Configuration:" << std::endl;
     std::cout << "  LMS Server: " << config.lmsServer << ":" << config.lmsPort << std::endl;
@@ -798,6 +929,11 @@ int main(int argc, char* argv[]) {
 
     // Register stream callback
     slimproto->onStream([&](const StrmCommand& cmd, const std::string& httpRequest) {
+#ifdef FREEZE_WATCHDOG
+        // Mark this handler as in flight; the guard clears it on every return path
+        // so the watchdog only fires if the handler itself wedges (the freeze).
+        WdCmdGuard _wdGuard(wdStrmName(cmd.command));
+#endif
         switch (cmd.command) {
             case STRM_START: {
                 LOG_INFO("Stream start requested (format=" << cmd.format << ")");
@@ -1953,6 +2089,11 @@ int main(int argc, char* argv[]) {
     if (diretta->isOpen()) diretta->close();
     diretta->disable();
     g_diretta = nullptr;
+
+#ifdef FREEZE_WATCHDOG
+    wdRunning.store(false, std::memory_order_release);
+    if (wdThread.joinable()) wdThread.join();
+#endif
 
     shutdownAsyncLogging();
     return 0;

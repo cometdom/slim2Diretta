@@ -16,7 +16,7 @@ if(DEFINED ENV{LLVM} OR LLVM)
     set(USE_LLD    ON CACHE BOOL "Use lld linker with clang"     FORCE)
 endif()
 
-project(slim2diretta VERSION 1.4.12)
+project(slim2diretta VERSION 1.4.13)
 
 set(CMAKE_CXX_STANDARD 17)
 
@@ -568,6 +568,21 @@ endif()
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -O2")
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
+# ============================================
+# Freeze watchdog (diagnostic build)
+# ============================================
+# When ON, compiles the SIGUSR2/watchdog thread that dumps per-thread backtraces
+# if a Slimproto handler stalls (rapid-seek freeze diagnostic). Needs -rdynamic so
+# backtrace_symbols_fd() prints function names, and -g for line numbers. No effect
+# on the audio path. Turn OFF for normal release builds: -DENABLE_FREEZE_WATCHDOG=OFF
+option(ENABLE_FREEZE_WATCHDOG "Diagnostic: dump thread backtraces when a Slimproto handler stalls" ON)
+if(ENABLE_FREEZE_WATCHDOG)
+    add_compile_definitions(FREEZE_WATCHDOG)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g")
+    target_link_options(slim2diretta PRIVATE -rdynamic)
+    message(STATUS "Freeze watchdog ENABLED (diagnostic build: -rdynamic -g)")
+endif()
 
 # ============================================
 # Link-Time Optimization (LTO)

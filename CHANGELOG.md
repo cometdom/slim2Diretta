@@ -2,6 +2,12 @@
 
 All notable changes to slim2diretta are documented in this file.
 
+## v1.4.13 (2026-07-05)
+
+### Added
+
+- **Freeze diagnostic watchdog (rapid-seek freeze investigation)** — v1.4.12's non-blocking `recv()` fix helped (the audio thread now reaches the HTTP-connect stage that earlier builds froze before) but did **not** fully close the rapid-seek freeze. Two fresh logs show playback still wedges right after `[HTTP] Stream connected`, before the format is decoded — and, decisively, the 10 s format-detection stall timeout never fires, which proves the thread is **blocked** (not spinning) *before* it reaches that loop. The remaining stuck call is one of a small set of candidates that asynchronous logging cannot disambiguate, and the affected user runs GentooPlayer (no SSH, no gdb), so a normal backtrace isn't available. This release adds a self-contained diagnostic: a low-priority watchdog thread times how long each Slimproto stream-command handler has been running and, if one stalls beyond 4 s (a handler never legitimately runs that long), dumps **every thread's backtrace straight into the log** — the same output stream the normal logs use — so the exact frozen frame is captured with no external tooling. Built with `-rdynamic` so application and library frames are named directly in the dump. The watchdog has **no effect on the audio path** and only acts on an actual stall; it can be turned off at configure time with `-DENABLE_FREEZE_WATCHDOG=OFF`. There is no functional change to playback in this release — it exists to capture the final piece of the freeze diagnosis.
+
 ## v1.4.12 (2026-07-03)
 
 ### Fixed
