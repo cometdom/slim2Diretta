@@ -25,6 +25,7 @@
 #include <vector>
 #include <algorithm>
 #include <random>
+#include <chrono>
 
 // ============================================
 // Constructor / Destructor
@@ -283,13 +284,17 @@ void SlimprotoClient::handleStrm(const uint8_t* data, size_t len) {
             uint32_t ts = cmd.getReplayGain();
             m_serverTimestamp = ts;
             sendStat(StatEvent::STMt, ts);
-            // Log heartbeat only once per minute to reduce noise
+            // Log heartbeat only once per minute to reduce noise.
+            // Throttle on wall clock, not on the server timestamp: LMS often
+            // sends ts=0 continuously, which made the previous ts-based test
+            // log every single heartbeat instead of one per minute.
             {
-                static uint32_t lastLoggedTs = 0;
-                if (ts == 0 || ts >= lastLoggedTs + 60000) {
-                    LOG_DEBUG("[Slimproto] heartbeat (ts="
-                              << ts << ")");
-                    lastLoggedTs = ts;
+                static auto lastLogTime = std::chrono::steady_clock::now();
+                auto now = std::chrono::steady_clock::now();
+                if (std::chrono::duration_cast<std::chrono::seconds>(
+                        now - lastLogTime).count() >= 60) {
+                    LOG_DEBUG("[Slimproto] heartbeat (ts=" << ts << ")");
+                    lastLogTime = now;
                 }
             }
             return;  // Don't invoke stream callback for heartbeats
