@@ -2,6 +2,17 @@
 
 All notable changes to slim2diretta are documented in this file.
 
+## v1.4.14 (2026-07-21)
+
+### Fixed
+
+- **Heartbeat log was never actually throttled** — the "once per minute" guard was keyed on the LMS server timestamp (`if (ts == 0 || ts >= lastLoggedTs + 60000)`), but LMS commonly sends `ts=0` continuously, so the first branch matched every time and *every* heartbeat was logged. Throttling now uses `steady_clock`, so it really is one line per minute regardless of what the server puts in the timestamp field. Log-only change — no functional impact on playback. (Same approach already used in slim2UPnP.)
+
+### Changed
+
+- **Licence made explicit per file** — the sources under `src/` carried no licence marker. Added the standard SPDX header (`SPDX-License-Identifier: MIT`) plus the copyright line to the 25 files under `src/`, and normalised the holder in `LICENSE` to the official form `Dominique COMET (cometdom)` (previously just "Dominique"), consistent with the sibling projects. **Licence terms are unchanged (MIT)** — this only makes the existing terms explicit. `diretta/` is deliberately left untouched: it wraps the proprietary Diretta Host SDK (personal use only), so a blanket MIT header there would be misleading.
+- Version updated to 1.4.14
+
 ## v1.4.13 (2026-07-05)
 
 ### Added
