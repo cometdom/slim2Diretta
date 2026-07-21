@@ -1,4 +1,4 @@
-# slim2diretta v1.4.12
+# slim2diretta v1.4.13
 
 **Native LMS Player with Diretta Output - Mono-Process Architecture**
 
@@ -982,4 +982,4 @@ This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) 
 
 **Enjoy native DSD and hi-res PCM streaming from your LMS library!**
 
-*Last updated: 2026-07-03 (v1.4.12)*
+*Last updated: 2026-07-21 (v1.4.13)*
