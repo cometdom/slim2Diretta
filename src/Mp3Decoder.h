@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2025-2026 Dominique COMET (cometdom)
+// This file is part of slim2diretta. See LICENSE for details.
+
 /**
  * @file Mp3Decoder.h
  * @brief MP3 stream decoder using libmpg123
