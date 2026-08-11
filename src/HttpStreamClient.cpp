@@ -91,10 +91,26 @@ bool HttpStreamClient::connect(const std::string& serverIp, uint16_t serverPort,
 
     m_connected.store(true, std::memory_order_release);
 
+    // Remember for reconnect(). serverIp/httpRequest may alias m_lastServerIp/
+    // m_lastHttpRequest when called from reconnect() itself — self-assignment
+    // of std::string is well-defined, so this is safe either way.
+    m_lastServerIp = serverIp;
+    m_lastServerPort = serverPort;
+    m_lastHttpRequest = httpRequest;
+
     LOG_INFO("[HTTP] Stream connected (status " << m_httpStatus << ")");
     LOG_DEBUG("[HTTP] Response headers:\n" << m_responseHeaders);
 
     return true;
+}
+
+bool HttpStreamClient::reconnect() {
+    if (m_lastServerPort == 0) {
+        LOG_ERROR("[HTTP] reconnect() called with no prior successful connect()");
+        return false;
+    }
+    LOG_INFO("[HTTP] Reconnecting to " << m_lastServerIp << ":" << m_lastServerPort);
+    return connect(m_lastServerIp, m_lastServerPort, m_lastHttpRequest);
 }
 
 void HttpStreamClient::disconnect() {

@@ -2,6 +2,12 @@
 
 All notable changes to slim2diretta are documented in this file.
 
+## v1.4.15 (2026-08-11)
+
+### Fixed
+
+- **Mid-stream stall recovery for PCM/FLAC and DSD** — playing internet radio relayed through LMS could hang silently forever if the upstream source hiccupped without LMS closing the TCP connection: the keepalive kept the socket looking "connected", `HttpStreamClient::readWithTimeout()` just kept returning 0, and neither the PCM/FLAC nor the DSD audio-read loop had any protection once the format had already been detected and playback had started (the existing `FORMAT_DETECT_TIMEOUT_MS` safety net only covers the window *before* format detection — DSD had no protection at all, not even in that window). Fixed by adding a 5s/3-attempt stall timer to both loops: on prolonged silence, `HttpStreamClient::reconnect()` (new method, replays the original LMS-provided server/port/HTTP request from the initial `strm-s`) re-establishes the connection. Raw PCM keeps feeding the same decoder (no container to reparse); FLAC/MP3/OGG/AAC and DSD (DSF/DFF) get a fresh decoder/reader instance and re-run format detection, since the reconnected response starts a new container — `DirettaSync`/the ring buffer stay open and untouched throughout, so there's no audible glitch beyond the reconnect gap itself. After 3 failed attempts, falls back to the existing clean-abort behaviour (`STMn`, disconnect, let the next `strm-s` cold-start). Found and fixed following review of the equivalent DirettaRendererUPnP fix (PR #84 by hoorna/Alfred, v2.5.11) — the two projects share the same class of bug but not the same architecture (no FFmpeg `av_read_frame()`/`AVIOInterruptCB` here; LMS is the sole upstream, not an arbitrary proxied URL), so this is an independent implementation adapted to `HttpStreamClient`/Slimproto rather than a port.
+
 ## v1.4.14 (2026-07-21)
 
 ### Fixed
