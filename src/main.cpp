@@ -44,7 +44,7 @@
 #include <sched.h>
 #include <cerrno>
 
-#define SLIM2DIRETTA_VERSION "1.4.14"
+#define SLIM2DIRETTA_VERSION "1.4.15"
 
 // Read /sys/devices/system/cpu/online and return the set of online CPU IDs.
 // Handles both ranges ("0-7") and lists ("0,2,4,6,8,10,12,14").
@@ -1120,6 +1120,17 @@ int main(int argc, char* argv[]) {
                         auto gaplessWaitStart = std::chrono::steady_clock::now();
                         constexpr int GAPLESS_WAIT_MS = 2000;
 
+                        // Stall recovery: the DSD path had no timeout protection at all
+                        // (unlike PCM/FLAC's pre-format FORMAT_DETECT_TIMEOUT_MS below) —
+                        // a stream that connects but goes silent (TCP kept alive by
+                        // keepalives, e.g. LMS relaying internet radio whose upstream
+                        // hiccups without closing the socket) hung forever. Applies both
+                        // before and after format detection since neither had protection.
+                        constexpr int DSD_STALL_TIMEOUT_MS = 5000;
+                        constexpr int DSD_MAX_RECONNECTS = 3;
+                        auto lastDataTime = std::chrono::steady_clock::now();
+                        int reconnectAttempts = 0;
+
                         while (audioTestRunning.load(std::memory_order_acquire) &&
                                (!httpEof || dsdReader->availableBytes() > 0 ||
                                 !dsdReader->isFinished() ||
@@ -1144,6 +1155,44 @@ int main(int argc, char* argv[]) {
                                 } else {
                                     httpEof = true;
                                     dsdReader->setEof();
+                                }
+                            }
+
+                            // === STALL RECOVERY: reconnect on prolonged silence ===
+                            if (gotData) {
+                                lastDataTime = std::chrono::steady_clock::now();
+                                reconnectAttempts = 0;
+                            } else if (!httpEof && httpStream->isConnected()) {
+                                auto stalledMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                    std::chrono::steady_clock::now() - lastDataTime).count();
+                                if (stalledMs > DSD_STALL_TIMEOUT_MS) {
+                                    if (reconnectAttempts < DSD_MAX_RECONNECTS) {
+                                        ++reconnectAttempts;
+                                        LOG_WARN("[Audio] DSD stream stalled " << stalledMs
+                                                 << "ms, reconnecting (" << reconnectAttempts << "/"
+                                                 << DSD_MAX_RECONNECTS << ")...");
+                                        httpStream->disconnect();
+                                        if (httpStream->reconnect()) {
+                                            // Fresh HTTP response = fresh DSF/DFF container.
+                                            // Recreate the reader and re-detect the format;
+                                            // DirettaSync/ring buffer (direttaOpened) is untouched.
+                                            dsdReader = std::make_unique<DsdStreamReader>();
+                                            if (hintRate > 0) {
+                                                dsdReader->setRawDsdFormat(hintRate, hintCh);
+                                            }
+                                            formatLogged = false;
+                                            lastDataTime = std::chrono::steady_clock::now();
+                                            LOG_INFO("[Audio] DSD stream reconnected");
+                                        } else {
+                                            LOG_WARN("[Audio] DSD reconnect attempt "
+                                                     << reconnectAttempts << " failed");
+                                        }
+                                    } else {
+                                        LOG_ERROR("[Audio] DSD stream stalled, giving up after "
+                                                   << DSD_MAX_RECONNECTS << " reconnect attempts");
+                                        httpEof = true;
+                                        dsdReader->setEof();
+                                    }
                                 }
                             }
 
@@ -1418,6 +1467,22 @@ int main(int argc, char* argv[]) {
                     // freeze playback until a manual service restart.
                     constexpr int FORMAT_DETECT_TIMEOUT_MS = 10000;
                     auto formatDetectStart = std::chrono::steady_clock::now();
+
+                    // Mid-stream stall recovery: the safety net above only covers a
+                    // stall BEFORE the format is known. Once playback has started, a
+                    // stream that stays connected (keepalive) but goes silent — e.g.
+                    // LMS relaying internet radio whose upstream hiccups without
+                    // closing the socket — hung forever with no recovery. Reconnect
+                    // with the same LMS-provided request instead.
+                    constexpr int MIDSTREAM_STALL_TIMEOUT_MS = 5000;
+                    constexpr int MIDSTREAM_MAX_RECONNECTS = 3;
+                    auto lastDataTime = std::chrono::steady_clock::now();
+                    int reconnectAttempts = 0;
+                    // Set true right after a reconnect that recreated the decoder, so
+                    // Phase 2's gapless-transition comparison (below) is skipped once:
+                    // this is still the same logical track, not a new chained one.
+                    bool skipGaplessCompareOnRedetect = false;
+
                     while (audioTestRunning.load(std::memory_order_acquire) &&
                            (!httpEof || cacheFrames() > 0)) {
 
@@ -1485,6 +1550,61 @@ int main(int argc, char* argv[]) {
                             return;
                         }
 
+                        // ========== Mid-stream stall recovery ==========
+                        if (formatLogged) {
+                            if (gotData) {
+                                lastDataTime = std::chrono::steady_clock::now();
+                                reconnectAttempts = 0;
+                            } else if (!httpEof && httpStream->isConnected()) {
+                                auto stalledMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                    std::chrono::steady_clock::now() - lastDataTime).count();
+                                if (stalledMs > MIDSTREAM_STALL_TIMEOUT_MS) {
+                                    if (reconnectAttempts < MIDSTREAM_MAX_RECONNECTS) {
+                                        ++reconnectAttempts;
+                                        LOG_WARN("[Audio] Stream stalled " << stalledMs
+                                                 << "ms, reconnecting (" << reconnectAttempts << "/"
+                                                 << MIDSTREAM_MAX_RECONNECTS << ")...");
+                                        httpStream->disconnect();
+                                        if (httpStream->reconnect()) {
+                                            if (curFormatCode == FORMAT_PCM) {
+                                                // Raw PCM has no container to reparse —
+                                                // keep feeding the same decoder, just
+                                                // resume the byte stream.
+                                            } else {
+                                                // Compressed container (FLAC/MP3/OGG/AAC):
+                                                // the reconnected response starts a fresh
+                                                // container the existing decoder's
+                                                // mid-stream state can't parse. Recreate
+                                                // it and re-detect the format.
+                                                auto freshDecoder = Decoder::create(
+                                                    curFormatCode, config.decoderBackend);
+                                                if (freshDecoder) {
+                                                    decoder = std::move(freshDecoder);
+                                                    formatLogged = false;
+                                                    skipGaplessCompareOnRedetect = true;
+                                                } else {
+                                                    LOG_ERROR("[Audio] Failed to recreate "
+                                                              "decoder after reconnect");
+                                                    httpEof = true;
+                                                    decoder->setEof();
+                                                }
+                                            }
+                                            lastDataTime = std::chrono::steady_clock::now();
+                                            LOG_INFO("[Audio] Stream reconnected");
+                                        } else {
+                                            LOG_WARN("[Audio] Reconnect attempt "
+                                                     << reconnectAttempts << " failed");
+                                        }
+                                    } else {
+                                        LOG_ERROR("[Audio] Stream stalled, giving up after "
+                                                   << MIDSTREAM_MAX_RECONNECTS << " reconnect attempts");
+                                        httpEof = true;
+                                        decoder->setEof();
+                                    }
+                                }
+                            }
+                        }
+
                         // ========== PHASE 1b: Drain decoder into cache ==========
                         // Always drain, even after httpEof — decoder may have
                         // buffered data from previous feed() calls.
@@ -1507,8 +1627,11 @@ int main(int argc, char* argv[]) {
                                      << fmt.bitDepth << "-bit, " << fmt.channels << " ch");
 
                             // Gapless continuation: DirettaSync already open
-                            // from previous track via shared cache
-                            if (direttaOpened && !pcmFirstTrack) {
+                            // from previous track via shared cache. Skipped when
+                            // re-detecting after a mid-stream reconnect — that's
+                            // still the same logical track, not a gapless
+                            // transition, so no STMl resend / cache drain.
+                            if (direttaOpened && !pcmFirstTrack && !skipGaplessCompareOnRedetect) {
                                 bool sameFormat =
                                     (fmt.sampleRate == audioFmt.sampleRate &&
                                      fmt.channels == audioFmt.channels);
@@ -1550,6 +1673,7 @@ int main(int argc, char* argv[]) {
                                     direttaOpened = false;
                                 }
                             }
+                            skipGaplessCompareOnRedetect = false;
 
                             detectedChannels = fmt.channels;
                             audioFmt.sampleRate = fmt.sampleRate;

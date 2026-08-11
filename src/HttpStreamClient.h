@@ -33,6 +33,14 @@ public:
     bool connect(const std::string& serverIp, uint16_t serverPort,
                  const std::string& httpRequest);
 
+    // Reconnect using the server/port/request from the last successful connect().
+    // Used to recover a mid-track stall (TCP connection kept alive by keepalives
+    // but no more bytes ever arrive — e.g. LMS relaying internet radio whose
+    // upstream hiccups without LMS closing the socket) without needing the caller
+    // to keep the original strm-s parameters around. Returns false if no prior
+    // connect() succeeded, or if the reconnect attempt itself fails.
+    bool reconnect();
+
     void disconnect();
     bool isConnected() const;
 
@@ -56,6 +64,11 @@ public:
 private:
     int m_socket = -1;
     std::atomic<bool> m_connected{false};
+
+    // Remembered from the last successful connect(), used by reconnect().
+    std::string m_lastServerIp;
+    uint16_t m_lastServerPort = 0;
+    std::string m_lastHttpRequest;
 
     std::string m_responseHeaders;
     int m_httpStatus = 0;
