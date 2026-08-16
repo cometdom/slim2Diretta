@@ -2,6 +2,12 @@
 
 All notable changes to slim2diretta are documented in this file.
 
+## v1.4.16 (2026-08-16)
+
+### Fixed
+
+- **v1.4.15's mid-stream reconnect broke compressed-format streams (regression)** — reported by simonhiggs: BBC iPlayer via Lyrion (LMS-transcoded to AAC) failed to play on v1.4.15, while plain relay radio stations were unaffected; reverting to v1.4.14 fixed it. Root cause: when a FLAC/MP3/OGG/AAC stream hit the v1.4.15 mid-stream stall recovery, the audio-read loop reset `formatLogged = false` to force re-detection of the fresh container from the reconnected HTTP response, but never reset `formatDetectStart` — the timestamp the *separate* pre-format-detection stall safety net (`FORMAT_DETECT_TIMEOUT_MS`, 10s) measures against. That timestamp was still set to when the track originally started, already stale by the time a mid-stream reconnect happens (the mid-stream path only triggers once format detection has *already* succeeded once). So on the very next loop iteration after any successful mid-stream reconnect, the stall safety net saw `!formatLogged` with an already-expired 10s window and aborted the stream immediately — before the fresh decoder had a chance to see a single byte of the new connection. Only hit compressed containers (raw PCM keeps its decoder, never resets `formatLogged`) and only when a mid-stream stall/reconnect actually occurred, which is why plain relay stations were unaffected but BBC iPlayer's transcoded stream (apparently prone to brief upstream hiccups) tripped it reliably. Fixed by resetting `formatDetectStart` alongside `formatLogged` when the decoder is recreated post-reconnect, giving the fresh container a real 10s detection window. DSD's reconnect path was not affected — it uses a single unified stall timer for both phases, correctly reset on reconnect already.
+
 ## v1.4.15 (2026-08-11)
 
 ### Fixed
