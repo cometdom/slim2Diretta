@@ -44,7 +44,7 @@
 #include <sched.h>
 #include <cerrno>
 
-#define SLIM2DIRETTA_VERSION "1.4.15"
+#define SLIM2DIRETTA_VERSION "1.4.16"
 
 // Read /sys/devices/system/cpu/online and return the set of online CPU IDs.
 // Handles both ranges ("0-7") and lists ("0,2,4,6,8,10,12,14").
@@ -1581,6 +1581,7 @@ int main(int argc, char* argv[]) {
                                                 if (freshDecoder) {
                                                     decoder = std::move(freshDecoder);
                                                     formatLogged = false;
+                                                    formatDetectStart = std::chrono::steady_clock::now();
                                                     skipGaplessCompareOnRedetect = true;
                                                 } else {
                                                     LOG_ERROR("[Audio] Failed to recreate "
