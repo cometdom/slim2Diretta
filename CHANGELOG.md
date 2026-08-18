@@ -2,6 +2,12 @@
 
 All notable changes to slim2diretta are documented in this file.
 
+## v1.4.17 (2026-08-18)
+
+### Fixed
+
+- **Mid-stream stall recovery false-positived on bursty sources, causing audible clicks (regression, v1.4.15/v1.4.16)** — reported by simonhiggs: after v1.4.16 fixed BBC iPlayer's outright playback failure, the stream played but with frequent tiny skips and clicks, roughly every 6-17s. Logs showed the mid-stream stall recovery reconnecting on a clockwork cycle even though the ring buffer never dropped below ~95% full — right before the first "stalled 5001ms" warning, the decode cache alone held 711,680 frames (~14.8s of buffered audio). Root cause: the stall timer only measured elapsed time since the last raw HTTP socket read, with no awareness of how much already-decoded audio was still buffered ahead. Lyrion's relay for this particular internet-radio plugin delivers AAC data in bursts with gaps regularly exceeding the 5s timeout — normal behaviour for that source, not a stall — but every gap was treated as dead-stream recovery: HTTP reconnect plus a full decoder/format re-detection, each one an audible glitch, even though the local cache had 10+ seconds of margin and needed nothing. Fixed by gating the reconnect on actual buffer health: only reconnect once the decode cache has drained to ≤3s of remaining audio (`MIDSTREAM_STALL_MIN_CACHE_SEC`), regardless of how long the HTTP side has been quiet. A source that bursts within its cache margin now plays straight through with no reconnect; a genuinely dead stream still recovers once the cache actually runs low, same as before. DSD's stall path is unaffected — it has no equivalent deep cache to check against, so its raw-timing heuristic remains appropriate there.
+
 ## v1.4.16 (2026-08-16)
 
 ### Fixed
