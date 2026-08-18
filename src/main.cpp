@@ -44,7 +44,7 @@
 #include <sched.h>
 #include <cerrno>
 
-#define SLIM2DIRETTA_VERSION "1.4.16"
+#define SLIM2DIRETTA_VERSION "1.4.17"
 
 // Read /sys/devices/system/cpu/online and return the set of online CPU IDs.
 // Handles both ranges ("0-7") and lists ("0,2,4,6,8,10,12,14").
@@ -1476,6 +1476,15 @@ int main(int argc, char* argv[]) {
                     // with the same LMS-provided request instead.
                     constexpr int MIDSTREAM_STALL_TIMEOUT_MS = 5000;
                     constexpr int MIDSTREAM_MAX_RECONNECTS = 3;
+                    // Some sources legitimately deliver in bursts with gaps longer
+                    // than MIDSTREAM_STALL_TIMEOUT_MS between HTTP reads (observed
+                    // with BBC iPlayer via Lyrion's plugin relay) while decodeCache
+                    // still holds many seconds of already-decoded audio. Reconnecting
+                    // on raw byte-arrival timing alone false-positives on those gaps
+                    // and needlessly recreates the decoder, causing an audible click
+                    // per gap. Only actually reconnect once the cache is genuinely
+                    // running low, regardless of how long the HTTP side has been quiet.
+                    constexpr double MIDSTREAM_STALL_MIN_CACHE_SEC = 3.0;
                     auto lastDataTime = std::chrono::steady_clock::now();
                     int reconnectAttempts = 0;
                     // Set true right after a reconnect that recreated the decoder, so
@@ -1558,7 +1567,11 @@ int main(int argc, char* argv[]) {
                             } else if (!httpEof && httpStream->isConnected()) {
                                 auto stalledMs = std::chrono::duration_cast<std::chrono::milliseconds>(
                                     std::chrono::steady_clock::now() - lastDataTime).count();
-                                if (stalledMs > MIDSTREAM_STALL_TIMEOUT_MS) {
+                                double cacheSec = audioFmt.sampleRate > 0
+                                    ? static_cast<double>(cacheFrames()) / audioFmt.sampleRate
+                                    : 0.0;
+                                if (stalledMs > MIDSTREAM_STALL_TIMEOUT_MS &&
+                                    cacheSec <= MIDSTREAM_STALL_MIN_CACHE_SEC) {
                                     if (reconnectAttempts < MIDSTREAM_MAX_RECONNECTS) {
                                         ++reconnectAttempts;
                                         LOG_WARN("[Audio] Stream stalled " << stalledMs
