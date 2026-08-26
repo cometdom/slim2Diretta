@@ -311,6 +311,14 @@ build_slim2diretta() {
         print_info "re-run with: env LLVM=1 ./install.sh -b"
     fi
 
+    # Environment variable shortcut: ARCH_NAME=<variant> -> override the
+    # auto-detected Diretta SDK library variant (e.g. to opt into a
+    # GCC16-built variant such as x64-linux-16v3 — see CLAUDE.md/README).
+    if [ -n "$ARCH_NAME" ]; then
+        cmake_opts="$cmake_opts -DARCH_NAME=$ARCH_NAME"
+        print_info "ARCH_NAME=$ARCH_NAME: overriding auto-detected SDK library variant"
+    fi
+
     cd build
 
     # Configure with CMake

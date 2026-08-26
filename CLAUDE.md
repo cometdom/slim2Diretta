@@ -29,6 +29,9 @@ cmake -DARCH_NAME=aarch64-linux-15k16 ..  # Raspberry Pi 5 (16KB pages)
 # variant's GCC major version. Opt in explicitly if you want to try it:
 cmake -DARCH_NAME=x64-linux-16v3 ..       # x64 AVX2, GCC16-built lib
 
+# Same override via install.sh (ARCH_NAME env var, mirrors the LLVM=1 convention):
+env ARCH_NAME=x64-linux-16v3 ./install.sh -b
+
 # Custom SDK path
 export DIRETTA_SDK_PATH=/path/to/DirettaHostSDK_149
 cmake ..
