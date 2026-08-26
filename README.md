@@ -469,6 +469,21 @@ env LLVM=1 VERBOSE=1 ./install.sh -b
 
 `V=1` is accepted as a synonym for `VERBOSE=1`.
 
+### GCC16-built SDK library variant (experimental)
+
+Diretta SDK v149+ ships each architecture variant built with both GCC15 (the default, auto-detected) and GCC16. One tester reported measurably better sound quality with the GCC16 build ([GitHub issue #10](https://github.com/cometdom/slim2Diretta/issues/10)). Opt in with the `ARCH_NAME` environment variable — works with either `install.sh` usage style, same as `LLVM=1` above:
+
+```bash
+env ARCH_NAME=x64-linux-16v3 ./install.sh       # interactive menu, GCC16-built lib
+env ARCH_NAME=x64-linux-16v3 ./install.sh -b    # direct build, GCC16-built lib
+# or directly with cmake:
+cmake -DARCH_NAME=x64-linux-16v3 .. && make -j$(nproc)
+```
+
+Other GCC16 variants: `x64-linux-16v4` (AVX-512), `x64-linux-16zen4` (AMD Ryzen 7000+), `aarch64-linux-16k4` (4KB pages), `aarch64-linux-16k16` (16KB pages, Pi 5/CM5), `riscv64-linux-16`.
+
+**Caveat**: this is untested against an older host toolchain — a static library built with a newer GCC can reference `libstdc++` symbol versions the installed runtime doesn't have. The build will warn (non-fatal) if your system's `gcc` is older than GCC16; if the resulting binary fails to start with a `GLIBCXX_3.4.xx not found` error, fall back to the GCC15 variant (the default).
+
 ### Advanced CMake options
 
 Invoke `cmake` directly for fine-grained control:
@@ -477,15 +492,6 @@ Invoke `cmake` directly for fine-grained control:
 # Architecture override (if auto-detection fails)
 cmake -DARCH_NAME=x64-linux-15v3 ..       # x64 with AVX2
 cmake -DARCH_NAME=aarch64-linux-15k16 ..  # Raspberry Pi 5 / 16KB pages
-
-# SDK v149+ also ships GCC16-built variants (v3/v4/zen4 for x64, k4/k16
-# for aarch64, plain for riscv64). Reported to improve sound quality on
-# some setups but untested against an older host toolchain — CMake
-# warns if your system gcc is older than the variant's GCC version.
-cmake -DARCH_NAME=x64-linux-16v3 ..       # x64 with AVX2, GCC16-built lib
-
-# Same override via install.sh (ARCH_NAME env var, mirrors the LLVM=1 convention):
-env ARCH_NAME=x64-linux-16v3 ./install.sh -b
 
 # LTO and linker (what LLVM=1 does under the hood)
 CC=clang CXX=clang++ cmake -DENABLE_LTO=ON -DUSE_LLD=ON ..
