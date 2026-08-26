@@ -2,11 +2,12 @@
 
 All notable changes to slim2diretta are documented in this file.
 
-## v1.4.18 (2026-08-21)
+## v1.4.18 (2026-08-26)
 
 ### Added
 
 - **GCC16-built SDK variant support + toolchain compatibility check** — sheviks (GitHub issue #10) reported that Diretta SDK v149's GCC16-built static libraries (`libDirettaHost_x64-linux-16v3.a` etc., alongside the existing GCC15 ones) measurably improved sound quality on his setup, and asked whether a system-GCC-version check would be worth adding given the untested risk of mixing a GCC16-built static lib with an older host toolchain. `-DARCH_NAME=x64-linux-16v3` (and the aarch64/riscv64 GCC16 equivalents) already worked with no code change — CMake's variant selection was already generic. What was missing was the safety check: CMake now parses the GCC major version embedded in the selected variant name and compares it against the system's actual `gcc -dumpversion`, warning (non-fatal) when the system toolchain is older than a **GCC16+** variant, since a static lib built with a newer GCC can reference `libstdc++` symbol versions the installed runtime doesn't have — a failure that would surface at runtime (`GLIBCXX_3.4.xx not found`) rather than at build time, and independent of whether slim2diretta itself is built with gcc or clang (`LLVM=1` still links against the system libstdc++). The check is deliberately silent for the existing GCC15-vs-older-system combination, which has years of proven field use with no reported issues — only the new GCC16 territory is unverified. Auto-detection still defaults to GCC15 variants; GCC16 remains opt-in via `-DARCH_NAME=`.
+- **`install.sh` ARCH_NAME passthrough** — the CMake-level GCC16 support above had no way through the installer script: `build_slim2diretta()` only forwarded `LLVM=1`, so anyone using `install.sh` (the primary path for most users) had no supported way to try the new variant without bypassing the installer and invoking `cmake` by hand. Added an `ARCH_NAME` environment-variable passthrough mirroring the existing `LLVM=1` convention — `env ARCH_NAME=x64-linux-16v3 ./install.sh -b` — wired into the single `build_slim2diretta()` function shared by every entry point (`--full`, `--build`, `--update`, interactive menu), so one change covers them all.
 
 ## v1.4.17 (2026-08-18)
 

@@ -484,6 +484,9 @@ cmake -DARCH_NAME=aarch64-linux-15k16 ..  # Raspberry Pi 5 / 16KB pages
 # warns if your system gcc is older than the variant's GCC version.
 cmake -DARCH_NAME=x64-linux-16v3 ..       # x64 with AVX2, GCC16-built lib
 
+# Same override via install.sh (ARCH_NAME env var, mirrors the LLVM=1 convention):
+env ARCH_NAME=x64-linux-16v3 ./install.sh -b
+
 # LTO and linker (what LLVM=1 does under the hood)
 CC=clang CXX=clang++ cmake -DENABLE_LTO=ON -DUSE_LLD=ON ..
 
@@ -988,4 +991,4 @@ This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) 
 
 **Enjoy native DSD and hi-res PCM streaming from your LMS library!**
 
-*Last updated: 2026-08-21 (v1.4.18)*
+*Last updated: 2026-08-26 (v1.4.18)*
