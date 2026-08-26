@@ -21,6 +21,14 @@ cmake -DARCH_NAME=x64-linux-15v3 ..       # x64 AVX2 (most common)
 cmake -DARCH_NAME=aarch64-linux-15 ..     # Raspberry Pi 4
 cmake -DARCH_NAME=aarch64-linux-15k16 ..  # Raspberry Pi 5 (16KB pages)
 
+# SDK v149+ also ships GCC16-built variants (x64-linux-16v3/16v4/16zen4,
+# aarch64-linux-16k4/16k16, riscv64-linux-16) alongside the GCC15 ones
+# auto-detected by default. Reported to measurably improve sound quality
+# on some setups (GitHub issue #10) but untested against an older host
+# toolchain — CMake warns if the system gcc is older than the selected
+# variant's GCC major version. Opt in explicitly if you want to try it:
+cmake -DARCH_NAME=x64-linux-16v3 ..       # x64 AVX2, GCC16-built lib
+
 # Custom SDK path
 export DIRETTA_SDK_PATH=/path/to/DirettaHostSDK_149
 cmake ..
@@ -157,7 +165,7 @@ Key messages: HELO (registration), STAT (status), strm (stream control), audg (v
 
 ## Dependencies
 
-- **Diretta Host SDK v147, v148, or v149** (proprietary, not committed, personal use). Auto-detected at CMake configure time via `Host/Release.hpp` parsing — newer releases that preserve the same header layout will be picked up automatically.
+- **Diretta Host SDK v147, v148, or v149** (proprietary, not committed, personal use). Auto-detected at CMake configure time via `Host/Release.hpp` parsing — newer releases that preserve the same header layout will be picked up automatically. v149+ ships each arch variant built with both GCC15 and GCC16 (`-DARCH_NAME=`); CMake warns if the system gcc is older than the selected variant's GCC major version (only for GCC16+, since GCC15-vs-older-system has years of proven field use — see build commands above and issue #10).
 - **libFLAC** (BSD-3-Clause) for FLAC decoding
 - **POSIX threads** (pthreads)
 - **C++17 runtime**

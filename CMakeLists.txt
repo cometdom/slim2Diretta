@@ -16,7 +16,7 @@ if(DEFINED ENV{LLVM} OR LLVM)
     set(USE_LLD    ON CACHE BOOL "Use lld linker with clang"     FORCE)
 endif()
 
-project(slim2diretta VERSION 1.4.17)
+project(slim2diretta VERSION 1.4.18)
 
 set(CMAKE_CXX_STANDARD 17)
 
@@ -270,6 +270,62 @@ endif()
 
 if(NOT EXISTS "${SDK_LIB_ACQUA}")
     message(WARNING "ACQUA library not found: ${ACQUA_LIB_NAME}")
+endif()
+
+# ============================================
+# SDK library / system toolchain compatibility check
+# ============================================
+# SDK v149+ ships each variant built with two different GCC major
+# versions (e.g. libDirettaHost_x64-linux-15v3.a vs ...-16v3.a — the
+# embedded "15"/"16" is the GCC version used to compile that static
+# lib, unrelated to the SDK release number). A static lib built with a
+# newer GCC can reference libstdc++ symbol versions the *installed*
+# libstdc++ runtime doesn't have yet, which fails at RUNTIME ("version
+# `GLIBCXX_3.4.xx' not found") rather than at build/link time — and
+# independent of which compiler CMake itself uses, since Clang builds
+# (LLVM=1) commonly link against the system libstdc++ too. So this
+# probes the system's gcc directly rather than CMAKE_CXX_COMPILER_VERSION.
+#
+# GCC 15 variants are the long-standing default (this project has built
+# fine on systems with a much older system gcc than that since day one,
+# with no reported runtime symbol issues) — only escalate to a WARNING
+# for GCC 16+ variants, which are new in SDK v149 and unverified against
+# an older host toolchain (this is the actual open question raised in
+# GitHub issue #10). Bump SDK_LIB_GCC_UNVERIFIED_FLOOR once a given GCC
+# generation has enough field use to be trusted the way 15 already is.
+set(SDK_LIB_GCC_UNVERIFIED_FLOOR 16)
+string(REGEX MATCH "linux-(musl)?([0-9]+)" _sdk_lib_gcc_match "${FULL_VARIANT}")
+if(_sdk_lib_gcc_match)
+    set(SDK_LIB_GCC_MAJOR "${CMAKE_MATCH_2}")
+    find_program(SYSTEM_GCC_EXECUTABLE NAMES gcc)
+    if(SYSTEM_GCC_EXECUTABLE)
+        execute_process(
+            COMMAND ${SYSTEM_GCC_EXECUTABLE} -dumpversion
+            OUTPUT_VARIABLE SYSTEM_GCC_VERSION
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+        )
+        string(REGEX MATCH "^[0-9]+" SYSTEM_GCC_MAJOR "${SYSTEM_GCC_VERSION}")
+        if(SYSTEM_GCC_MAJOR AND SYSTEM_GCC_MAJOR LESS SDK_LIB_GCC_MAJOR
+                AND SDK_LIB_GCC_MAJOR GREATER_EQUAL SDK_LIB_GCC_UNVERIFIED_FLOOR)
+            message(WARNING
+                "The selected Diretta SDK library (${FULL_VARIANT}) was built "
+                "with GCC ${SDK_LIB_GCC_MAJOR}, but the system gcc is only "
+                "version ${SYSTEM_GCC_MAJOR} (gcc -dumpversion). This is "
+                "untested: the static lib may reference libstdc++ symbols "
+                "newer than what's installed, which can make the built "
+                "binary fail to even start (\"version GLIBCXX_3.4.xx not "
+                "found\") rather than fail the build. If that happens, "
+                "either upgrade the system gcc/libstdc++, or pick a variant "
+                "built with GCC ${SYSTEM_GCC_MAJOR} instead via -DARCH_NAME=."
+            )
+        else()
+            message(STATUS "Toolchain check: system gcc ${SYSTEM_GCC_MAJOR}, "
+                            "SDK lib GCC ${SDK_LIB_GCC_MAJOR} (OK)")
+        endif()
+    else()
+        message(STATUS "Toolchain check: system gcc not found, skipping "
+                        "SDK lib / libstdc++ version check")
+    endif()
 endif()
 
 # Check for SDK headers and extract the actual release number from

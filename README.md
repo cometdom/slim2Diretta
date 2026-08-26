@@ -1,4 +1,4 @@
-# slim2diretta v1.4.17
+# slim2diretta v1.4.18
 
 **Native LMS Player with Diretta Output - Mono-Process Architecture**
 
@@ -8,7 +8,7 @@
 
 ---
 
-![Version](https://img.shields.io/badge/version-1.4.17-blue.svg)
+![Version](https://img.shields.io/badge/version-1.4.18-blue.svg)
 ![DSD](https://img.shields.io/badge/DSD-Native-green.svg)
 ![SDK](https://img.shields.io/badge/SDK-DIRETTA::Sync-orange.svg)
 
@@ -477,6 +477,12 @@ Invoke `cmake` directly for fine-grained control:
 # Architecture override (if auto-detection fails)
 cmake -DARCH_NAME=x64-linux-15v3 ..       # x64 with AVX2
 cmake -DARCH_NAME=aarch64-linux-15k16 ..  # Raspberry Pi 5 / 16KB pages
+
+# SDK v149+ also ships GCC16-built variants (v3/v4/zen4 for x64, k4/k16
+# for aarch64, plain for riscv64). Reported to improve sound quality on
+# some setups but untested against an older host toolchain — CMake
+# warns if your system gcc is older than the variant's GCC version.
+cmake -DARCH_NAME=x64-linux-16v3 ..       # x64 with AVX2, GCC16-built lib
 
 # LTO and linker (what LLVM=1 does under the hood)
 CC=clang CXX=clang++ cmake -DENABLE_LTO=ON -DUSE_LLD=ON ..
@@ -982,4 +988,4 @@ This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) 
 
 **Enjoy native DSD and hi-res PCM streaming from your LMS library!**
 
-*Last updated: 2026-08-18 (v1.4.17)*
+*Last updated: 2026-08-21 (v1.4.18)*
