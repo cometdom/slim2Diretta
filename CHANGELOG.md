@@ -2,6 +2,13 @@
 
 All notable changes to slim2diretta are documented in this file.
 
+## v1.4.20 (2026-08-27)
+
+### Fixed
+
+- **ReplayGain (v1.4.19) caused heavy distortion on real hardware** — reported by Dominique the same day v1.4.19 shipped. Root cause: every decoder in this codebase outputs MSB-aligned int32 PCM (real audio in the upper 3 bytes, low byte always zero), and `DirettaRingBuffer::detectS24PackMode()` auto-detects 24-bit alignment by checking that low byte is reliably zero across a probe window — the ring buffer's own comment already named this exact risk ("digital volume applied to MSB-aligned data, introducing non-zero noise in the LSB byte"). The gain multiply's round-to-nearest smeared real (if individually inaudible) precision into that byte, and whatever this did to the detector's confidence in some cases was enough to land the ring buffer on the wrong alignment — audible as heavy distortion, with volume control also seemingly inert since the same corruption dominated regardless of level. Fixed by masking the low byte to zero after the gain multiply: costs nothing audible (24-bit output only ever transmits the upper 3 bytes regardless of alignment, so that byte is discarded either way) and keeps the zero-padding invariant intact so the ambiguous-detection path is never reached at all.
+- **User-volume changes took up to a minute or more to become audible, only really landing after stopping and restarting the track** — reported by Dominique once the distortion above was fixed. Root cause: gain was applied when decoding into `decodeCache`, which can buffer nearly an entire CD-quality track ahead of actual playback (`DECODE_CACHE_MAX_SAMPLES`) — a live `audg` volume change only affected samples decoded *after* the change, so its audible effect lagged behind by however deep the cache already was. Track ReplayGain itself was unaffected (fixed per track, doesn't need to be "live"), but the live user-volume half of the feature was effectively unusable. Fixed by moving gain application to all 4 `sendAudio()` call sites instead, via a new `prepareForSend()` helper: `decodeCache` now stays gain-free at all times, and gain is applied to a small staging buffer immediately before each push, bounding the lag to `DirettaSync`'s own (much shallower) buffer depth. Safe against partial `sendAudio()` writes since `decodeCache` itself is never mutated — a retry just re-copies and re-gains the same still-clean source frames from the advanced position.
+
 ## v1.4.19 (2026-08-27)
 
 ### Added
