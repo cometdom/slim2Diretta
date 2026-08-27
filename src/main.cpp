@@ -265,6 +265,40 @@ static void applyReplayGain(int32_t* buf, size_t frames, int channels,
     }
 }
 
+// Applied here — at send time, reading straight out of decodeCache — rather
+// than when decoding into decodeCache, so a live user-volume change (audg)
+// is audible within DirettaSync's own buffer depth instead of lagging behind
+// decodeCache's much deeper readahead (up to DECODE_CACHE_MAX_SAMPLES, which
+// for a normal CD-quality track is on the order of a minute or more — a
+// volume change made there wouldn't audibly land until the track restarted).
+// Track ReplayGain doesn't need this — it's fixed for the whole track and
+// was already fine applied at decode time — but both factors are combined
+// here together for one shared code path across all 4 send sites.
+//
+// Returns `src` unchanged whenever nothing needs to change (feature off, or
+// the combined gain is unity) — zero copy/compute cost in that common case.
+// Otherwise copies up to `stagingCapacityFrames` frames into `stagingBuf`,
+// applies gain there, and returns that buffer instead — decodeCache itself
+// is never mutated, so a partial sendAudio() write (this project already
+// handles those - see the `framesWritten` accounting at each call site) just
+// means the next call re-copies+re-gains the same still-clean source frames
+// from the advanced position, with no risk of double-applying gain to any
+// sample.
+static const int32_t* prepareForSend(const int32_t* src, size_t frames, int channels,
+                                      int32_t* stagingBuf, size_t stagingCapacityFrames,
+                                      bool enableReplayGain, uint32_t trackGainSnapshot) {
+    if (!enableReplayGain || frames == 0) return src;
+    uint32_t gainL = combineGainQ16(trackGainSnapshot,
+                                     g_userGainLeft.load(std::memory_order_relaxed));
+    uint32_t gainR = combineGainQ16(trackGainSnapshot,
+                                     g_userGainRight.load(std::memory_order_relaxed));
+    if (gainL == GAIN_Q16_UNITY && gainR == GAIN_Q16_UNITY) return src;
+    size_t n = std::min(frames, stagingCapacityFrames);
+    std::memcpy(stagingBuf, src, n * static_cast<size_t>(channels) * sizeof(int32_t));
+    applyReplayGain(stagingBuf, n, channels, gainL, gainR);
+    return stagingBuf;
+}
+
 void signalHandler(int signal) {
     std::cout << "\nSignal " << signal << " received, shutting down..." << std::endl;
     g_running.store(false, std::memory_order_release);
@@ -1558,6 +1592,15 @@ int main(int argc, char* argv[]) {
                     constexpr size_t MAX_DECODE_FRAMES = 1024;
 
                     int32_t decodeBuf[MAX_DECODE_FRAMES * 2];
+
+                    // Staging buffer for prepareForSend() (ReplayGain applied at
+                    // send time — see its comment). Sized to the largest single
+                    // sendAudio() chunk used anywhere below: PUSH_CHUNK_FRAMES
+                    // (2048, Phase 4's high-sample-rate chunk size) covers every
+                    // site, since the others all cap at MAX_DECODE_FRAMES (1024).
+                    constexpr size_t GAIN_STAGING_FRAMES = 2048;
+                    int32_t gainStagingBuf[GAIN_STAGING_FRAMES * 2];
+
                     uint64_t totalBytes = 0;
                     bool formatLogged = false;
                     uint64_t lastElapsedLog = 0;
@@ -1742,13 +1785,8 @@ int main(int argc, char* argv[]) {
                                 size_t frames = decoder->readDecoded(
                                     decodeBuf, MAX_DECODE_FRAMES);
                                 if (frames == 0) break;
-                                if (config.enableReplayGain) {
-                                    applyReplayGain(decodeBuf, frames, detectedChannels,
-                                        combineGainQ16(trackGainSnapshot,
-                                                       g_userGainLeft.load(std::memory_order_relaxed)),
-                                        combineGainQ16(trackGainSnapshot,
-                                                       g_userGainRight.load(std::memory_order_relaxed)));
-                                }
+                                // ReplayGain (if enabled) is applied at send time in
+                                // prepareForSend() instead of here — see its comment.
                                 decodeCache.insert(decodeCache.end(), decodeBuf,
                                     decodeBuf + frames * detectedChannels);
                             }
@@ -1796,9 +1834,13 @@ int main(int argc, char* argv[]) {
                                         }
                                         size_t push = std::min(cacheFrames(),
                                                                MAX_DECODE_FRAMES);
+                                        const int32_t* sendPtr = prepareForSend(
+                                            decodeCache.data() + decodeCachePos, push,
+                                            detectedChannels, gainStagingBuf,
+                                            GAIN_STAGING_FRAMES, config.enableReplayGain,
+                                            trackGainSnapshot);
                                         size_t written = direttaPtr->sendAudio(
-                                            reinterpret_cast<const uint8_t*>(
-                                                decodeCache.data() + decodeCachePos),
+                                            reinterpret_cast<const uint8_t*>(sendPtr),
                                             push);
                                         size_t fw = written /
                                             (sizeof(int32_t) * detectedChannels);
@@ -1921,8 +1963,12 @@ int main(int argc, char* argv[]) {
                                        audioTestRunning.load(std::memory_order_relaxed)) {
                                     if (direttaPtr->getBufferLevel() > 0.95f) break;
                                     size_t chunk = std::min(remaining, MAX_DECODE_FRAMES);
+                                    const int32_t* sendPtr = prepareForSend(
+                                        ptr, chunk, detectedChannels, gainStagingBuf,
+                                        GAIN_STAGING_FRAMES, config.enableReplayGain,
+                                        trackGainSnapshot);
                                     size_t written = direttaPtr->sendAudio(
-                                        reinterpret_cast<const uint8_t*>(ptr),
+                                        reinterpret_cast<const uint8_t*>(sendPtr),
                                         chunk);
                                     size_t framesWritten = written /
                                         (sizeof(int32_t) * detectedChannels);
@@ -1963,9 +2009,13 @@ int main(int argc, char* argv[]) {
                                        direttaPtr->getBufferLevel() <= 0.95f) {
                                     size_t push = std::min(cacheFrames(),
                                                            chunkSize);
+                                    const int32_t* sendPtr = prepareForSend(
+                                        decodeCache.data() + decodeCachePos, push,
+                                        detectedChannels, gainStagingBuf,
+                                        GAIN_STAGING_FRAMES, config.enableReplayGain,
+                                        trackGainSnapshot);
                                     size_t written = direttaPtr->sendAudio(
-                                        reinterpret_cast<const uint8_t*>(
-                                            decodeCache.data() + decodeCachePos),
+                                        reinterpret_cast<const uint8_t*>(sendPtr),
                                         push);
                                     size_t framesWritten = written /
                                         (sizeof(int32_t) * detectedChannels);
@@ -2035,13 +2085,8 @@ int main(int argc, char* argv[]) {
                            audioTestRunning.load(std::memory_order_acquire)) {
                         size_t frames = decoder->readDecoded(decodeBuf, MAX_DECODE_FRAMES);
                         if (frames == 0) break;
-                        if (config.enableReplayGain) {
-                            applyReplayGain(decodeBuf, frames, detectedChannels,
-                                combineGainQ16(trackGainSnapshot,
-                                               g_userGainLeft.load(std::memory_order_relaxed)),
-                                combineGainQ16(trackGainSnapshot,
-                                               g_userGainRight.load(std::memory_order_relaxed)));
-                        }
+                        // ReplayGain (if enabled) is applied at send time in
+                        // prepareForSend() instead of here — see its comment.
                         decodeCache.insert(decodeCache.end(), decodeBuf,
                             decodeBuf + frames * detectedChannels);
                     }
@@ -2079,9 +2124,13 @@ int main(int argc, char* argv[]) {
                                 break;
                             }
                             size_t push = std::min(cacheFrames(), MAX_DECODE_FRAMES);
+                            const int32_t* sendPtr = prepareForSend(
+                                decodeCache.data() + decodeCachePos, push,
+                                detectedChannels, gainStagingBuf,
+                                GAIN_STAGING_FRAMES, config.enableReplayGain,
+                                trackGainSnapshot);
                             size_t written = direttaPtr->sendAudio(
-                                reinterpret_cast<const uint8_t*>(
-                                    decodeCache.data() + decodeCachePos),
+                                reinterpret_cast<const uint8_t*>(sendPtr),
                                 push);
                             size_t framesWritten = written /
                                 (sizeof(int32_t) * detectedChannels);
