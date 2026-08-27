@@ -203,6 +203,18 @@ The audio thread (in `main.cpp`) handles HTTP reading, decoding, and ring buffer
 
 This pattern was aligned with DirettaRendererUPnP's audio engine for consistent delivery characteristics across both projects.
 
+## ReplayGain / Digital Volume (v1.4.19)
+
+Opt-in via `--enable-replaygain` (off by default — default behaviour is unchanged and remains strictly bit-perfect). Reported repeatedly by users (Didier/ds21 among others) that LMS's ReplayGain had no effect and there was no way to control volume digitally. Root cause: LMS doesn't bake ReplayGain into the PCM bytes it sends, even when transcoding — it sends the gain as a separate value over Slimproto, expecting the *player* to apply it:
+- **`strm-s`'s per-track ReplayGain field** (`StrmCommand::getReplayGain()`, 16.16 fixed-point) — the accessor already existed (reused elsewhere for `p`/`u`/`t` sub-commands, where the same wire offset means "interval"/"timestamp") but was never called for `STRM_START`; the value was silently dropped. Now captured into `g_trackReplayGain` on every `STRM_START`. 0 = no ReplayGain info sent = treated as unity (never multiply by zero).
+- **`audg`'s live user-volume gain** (`AudgCommand::getNewGainLeft/Right()`, 16.16 fixed-point per channel) — already parsed and callback-wired (`onVolume`), but explicitly a no-op ("ignored - bit-perfect"). Now applied **only when LMS's `dvc` (digital volume control) flag is set** — `dvc=0` means the user has LMS configured for analog/hardware volume control, and applying gain on top of that would double-attenuate; slim2diretta respects that choice and leaves the signal alone in that case regardless of the `--enable-replaygain` setting.
+
+Both factors combine (`combineGainQ16()`, a 16.16×16.16 fixed-point multiply) into one gain applied to decoded PCM via `applyReplayGain()` — round-to-nearest (`+0x8000` before the `>>16`, avoids the extra quantization noise a plain truncating shift adds) with saturation to `INT32_MIN/MAX`. No floating point in the hot path, consistent with the rest of the codebase. Stereo gets independent left/right gains (so `audg` balance comes through); other channel counts fall back to the left gain for every channel. Unity gain is a no-op fast path, so enabling the feature costs nothing on a track/volume combination that doesn't actually need adjustment.
+
+**DSD is never affected regardless of this setting** — there is no bit-perfect way to scale a 1-bit delta-sigma stream, and DSD tracks never pass through `decodeCache` (the only place gain is applied; see the two `readDecoded()` call sites in the PCM/FLAC chaining loop and its post-EOF drain).
+
+**Gapless-transition race (caught and fixed before release)**: `STRM_START` for the *next* queued track arrives on the Slimproto thread and can overwrite `g_trackReplayGain` while the audio thread is still draining the *current* track's tail (the post-EOF drain loop, run after `httpEof` but before the decoder reports `isFinished()`) — a few dozen milliseconds of the outgoing track's tail could otherwise get the incoming track's gain. Fixed by snapshotting `trackGainSnapshot = g_trackReplayGain.load()` once at the top of each track's own `while(true)` chaining-loop iteration, used for both `decodeCache` insertion sites for that iteration. User-volume gain (`g_userGainLeft/Right`) is deliberately **not** snapshotted the same way — it's read live at every chunk so a mid-track volume change still applies immediately, matching how a real Squeezebox client behaves.
+
 ## Decoder Routing
 
 `Decoder::create()` in `Decoder.cpp` routes format codes to decoder implementations:

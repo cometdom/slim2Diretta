@@ -29,7 +29,12 @@ class SlimprotoClient {
 public:
     // Callback types
     using StreamCallback = std::function<void(const StrmCommand& cmd, const std::string& httpRequest)>;
-    using VolumeCallback = std::function<void(uint32_t gainLeft, uint32_t gainRight)>;
+    // dvc = LMS's "digital volume control" flag from the audg command: true
+    // means LMS expects the client to apply gainLeft/gainRight in software
+    // (no separate analog/hardware volume path in play). false means LMS
+    // assumes volume is handled elsewhere (e.g. an amp/DAC knob) and the
+    // client should leave the signal untouched even if this callback fires.
+    using VolumeCallback = std::function<void(uint32_t gainLeft, uint32_t gainRight, bool dvc)>;
 
     SlimprotoClient();
     ~SlimprotoClient();
