@@ -64,6 +64,20 @@
             ]
         },
         {
+            "name": "ReplayGain / Digital Volume",
+            "collapsed": false,
+            "settings": [
+                {
+                    "key": "enable-replaygain",
+                    "type": "boolean",
+                    "cli_arg": "--enable-replaygain",
+                    "label": "Enable ReplayGain / Digital Volume",
+                    "description": "Applies LMS's per-track ReplayGain and, when LMS is set to digital volume control, the live user volume to the PCM signal. OFF by default to preserve strict bit-perfect playback — enabling this means the signal is no longer bit-perfect. Never applied to DSD tracks.",
+                    "default": ""
+                }
+            ]
+        },
+        {
             "name": "CPU Affinity",
             "collapsed": true,
             "settings": [

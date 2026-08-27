@@ -44,7 +44,7 @@
 #include <sched.h>
 #include <cerrno>
 
-#define SLIM2DIRETTA_VERSION "1.4.18"
+#define SLIM2DIRETTA_VERSION "1.4.19"
 
 // Read /sys/devices/system/cpu/online and return the set of online CPU IDs.
 // Handles both ranges ("0-7") and lists ("0,2,4,6,8,10,12,14").
@@ -186,6 +186,63 @@ void shutdownAsyncLogging() {
 std::atomic<bool> g_running{true};
 SlimprotoClient* g_slimproto = nullptr;  // For signal handler access
 DirettaSync* g_diretta = nullptr;        // For SIGUSR1 stats dump
+
+// ============================================
+// ReplayGain / Digital Volume (opt-in — config.enableReplayGain)
+// ============================================
+//
+// Off by default: strict bit-perfect playback is unaffected unless the user
+// explicitly opts in. When enabled, the per-track ReplayGain LMS sends in
+// strm-s is combined with the live user-volume gain from audg (only when LMS
+// signals digital volume control via the dvc flag) into one 16.16 fixed-point
+// factor applied to decoded PCM before it reaches DirettaSync. Never applied
+// to DSD — there is no bit-perfect way to scale a 1-bit delta-sigma stream,
+// so DSD tracks are always played back untouched regardless of this setting.
+//
+// 0x10000 (65536) is unity gain in Slimproto's 16.16 fixed-point convention.
+constexpr uint32_t GAIN_Q16_UNITY = 0x10000;
+std::atomic<uint32_t> g_trackReplayGain{GAIN_Q16_UNITY};  // strm-s, per track
+std::atomic<uint32_t> g_userGainLeft{GAIN_Q16_UNITY};     // audg, only when dvc set
+std::atomic<uint32_t> g_userGainRight{GAIN_Q16_UNITY};
+
+// Combine two 16.16 fixed-point gains (each 0x10000 = unity) into one.
+static uint32_t combineGainQ16(uint32_t a, uint32_t b) {
+    return static_cast<uint32_t>((static_cast<uint64_t>(a) * b) >> 16);
+}
+
+// Scale one int32 PCM sample by a 16.16 fixed-point gain, with round-to-
+// nearest (avoids the extra quantization noise a plain truncating shift
+// would add) and saturation against the container's full range.
+static inline int32_t scaleGainQ16(int32_t sample, uint32_t gainQ16) {
+    int64_t scaled = (static_cast<int64_t>(sample) * gainQ16 + 0x8000) >> 16;
+    if (scaled > INT32_MAX) return INT32_MAX;
+    if (scaled < INT32_MIN) return INT32_MIN;
+    return static_cast<int32_t>(scaled);
+}
+
+// Apply the combined (track ReplayGain × user volume) gain in place to a
+// buffer of interleaved int32 PCM samples. Left/right gains let audg's
+// per-channel balance come through for stereo; other channel counts fall
+// back to the left gain for every channel. Unity gain is a no-op fast path
+// so this costs nothing when ReplayGain is enabled but the current track
+// (and volume) don't actually call for any adjustment.
+static void applyReplayGain(int32_t* buf, size_t frames, int channels,
+                             uint32_t gainQ16Left, uint32_t gainQ16Right) {
+    if (frames == 0) return;
+    if (channels == 2) {
+        if (gainQ16Left == GAIN_Q16_UNITY && gainQ16Right == GAIN_Q16_UNITY) return;
+        for (size_t f = 0; f < frames; f++) {
+            buf[f * 2]     = scaleGainQ16(buf[f * 2],     gainQ16Left);
+            buf[f * 2 + 1] = scaleGainQ16(buf[f * 2 + 1], gainQ16Right);
+        }
+    } else {
+        if (gainQ16Left == GAIN_Q16_UNITY) return;
+        size_t total = frames * static_cast<size_t>(std::max(channels, 1));
+        for (size_t i = 0; i < total; i++) {
+            buf[i] = scaleGainQ16(buf[i], gainQ16Left);
+        }
+    }
+}
 
 void signalHandler(int signal) {
     std::cout << "\nSignal " << signal << " received, shutting down..." << std::endl;
@@ -452,6 +509,9 @@ Config parseArguments(int argc, char* argv[]) {
         else if (arg == "--no-dsd") {
             config.dsdEnabled = false;
         }
+        else if (arg == "--enable-replaygain") {
+            config.enableReplayGain = true;
+        }
         else if (arg == "--decoder" && i + 1 < argc) {
             config.decoderBackend = argv[++i];
             if (config.decoderBackend != "native" && config.decoderBackend != "ffmpeg") {
@@ -597,6 +657,9 @@ Config parseArguments(int argc, char* argv[]) {
                       << "  --max-rate <hz>        Max sample rate (default: 1536000)\n"
                       << "  --no-dsd               Disable DSD support\n"
                       << "  --decoder <backend>    Decoder backend: native (default), ffmpeg\n"
+                      << "  --enable-replaygain    Apply LMS ReplayGain + digital volume to PCM\n"
+                      << "                         (opt-in, disabled by default — breaks strict\n"
+                      << "                         bit-perfect playback; never applied to DSD)\n"
                       << "\n"
                       << "Logging:\n"
                       << "  -v, --verbose          Debug output (log level: DEBUG)\n"
@@ -941,6 +1004,24 @@ int main(int argc, char* argv[]) {
         switch (cmd.command) {
             case STRM_START: {
                 LOG_INFO("Stream start requested (format=" << cmd.format << ")");
+
+                // ReplayGain (opt-in, config.enableReplayGain): capture the
+                // per-track gain LMS computed for this track. 0 = no
+                // ReplayGain info sent = unity (do not multiply by zero!).
+                // Combined with the live user-volume gain (see onVolume
+                // below) when applying gain to decoded PCM in the audio
+                // thread. Cheap to always store even when the feature is
+                // off — applyReplayGain() itself is gated on the config flag.
+                {
+                    uint32_t rg = cmd.getReplayGain();
+                    g_trackReplayGain.store(rg != 0 ? rg : GAIN_Q16_UNITY,
+                                             std::memory_order_relaxed);
+                    if (config.enableReplayGain) {
+                        LOG_DEBUG("[ReplayGain] Track gain: 0x" << std::hex
+                                  << g_trackReplayGain.load(std::memory_order_relaxed)
+                                  << std::dec << (rg == 0 ? " (none)" : ""));
+                    }
+                }
 
                 // Cancel idle release timer and mark target as active
                 idleTimerActive.store(false, std::memory_order_release);
@@ -1409,6 +1490,18 @@ int main(int argc, char* argv[]) {
 
                     while (true) {  // === PCM/FLAC CHAINING LOOP ===
 
+                    // Snapshot this track's ReplayGain once, at the top of its own
+                    // iteration — NOT re-read live at every chunk like the user-volume
+                    // gain below. A gapless STRM_START for the *next* track can arrive
+                    // (on the Slimproto thread) and overwrite g_trackReplayGain while
+                    // this iteration is still draining the *current* track's tail
+                    // (the post-EOF drain loop further down); snapshotting keeps that
+                    // tail — and the rest of this track's processing — on the correct
+                    // gain regardless of when the next track's strm-s lands. User
+                    // volume (g_userGainLeft/Right) is intentionally NOT snapshotted:
+                    // a live volume change should still apply immediately mid-track.
+                    uint32_t trackGainSnapshot = g_trackReplayGain.load(std::memory_order_relaxed);
+
                     // Create decoder for this format
                     auto decoder = Decoder::create(curFormatCode, config.decoderBackend);
                     if (!decoder) {
@@ -1628,6 +1721,13 @@ int main(int argc, char* argv[]) {
                                 size_t frames = decoder->readDecoded(
                                     decodeBuf, MAX_DECODE_FRAMES);
                                 if (frames == 0) break;
+                                if (config.enableReplayGain) {
+                                    applyReplayGain(decodeBuf, frames, detectedChannels,
+                                        combineGainQ16(trackGainSnapshot,
+                                                       g_userGainLeft.load(std::memory_order_relaxed)),
+                                        combineGainQ16(trackGainSnapshot,
+                                                       g_userGainRight.load(std::memory_order_relaxed)));
+                                }
                                 decodeCache.insert(decodeCache.end(), decodeBuf,
                                     decodeBuf + frames * detectedChannels);
                             }
@@ -1914,6 +2014,13 @@ int main(int argc, char* argv[]) {
                            audioTestRunning.load(std::memory_order_acquire)) {
                         size_t frames = decoder->readDecoded(decodeBuf, MAX_DECODE_FRAMES);
                         if (frames == 0) break;
+                        if (config.enableReplayGain) {
+                            applyReplayGain(decodeBuf, frames, detectedChannels,
+                                combineGainQ16(trackGainSnapshot,
+                                               g_userGainLeft.load(std::memory_order_relaxed)),
+                                combineGainQ16(trackGainSnapshot,
+                                               g_userGainRight.load(std::memory_order_relaxed)));
+                        }
                         decodeCache.insert(decodeCache.end(), decodeBuf,
                             decodeBuf + frames * detectedChannels);
                     }
@@ -2108,9 +2215,24 @@ int main(int argc, char* argv[]) {
         }
     });
 
-    slimproto->onVolume([](uint32_t gainL, uint32_t gainR) {
-        LOG_DEBUG("Volume: L=0x" << std::hex << gainL << " R=0x" << gainR
-                  << std::dec << " (ignored - bit-perfect)");
+    slimproto->onVolume([&config](uint32_t gainL, uint32_t gainR, bool dvc) {
+        if (!config.enableReplayGain || !dvc) {
+            // Feature off, or LMS isn't asking for digital volume control
+            // (dvc=0 — e.g. user has LMS set to analog/hardware volume) —
+            // leave the stored gain at unity so applyReplayGain() only ever
+            // reflects the per-track ReplayGain in that case.
+            g_userGainLeft.store(GAIN_Q16_UNITY, std::memory_order_relaxed);
+            g_userGainRight.store(GAIN_Q16_UNITY, std::memory_order_relaxed);
+            LOG_DEBUG("Volume: L=0x" << std::hex << gainL << " R=0x" << gainR
+                      << std::dec << " dvc=" << (dvc ? "1" : "0")
+                      << (config.enableReplayGain ? " (ignored, dvc not set)"
+                                                   : " (ignored - bit-perfect)"));
+            return;
+        }
+        g_userGainLeft.store(gainL, std::memory_order_relaxed);
+        g_userGainRight.store(gainR, std::memory_order_relaxed);
+        LOG_DEBUG("[ReplayGain] User volume: L=0x" << std::hex << gainL
+                  << " R=0x" << gainR << std::dec);
     });
 
     // Helper: stop audio thread and wait for it to finish

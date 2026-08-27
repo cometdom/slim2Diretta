@@ -48,6 +48,13 @@ struct Config {
     bool dsdEnabled = true;
     std::string decoderBackend = "native";  // "native" or "ffmpeg"
 
+    // ReplayGain / digital volume (opt-in — off by default to preserve strict
+    // bit-perfect playback). When enabled, applies the per-track ReplayGain
+    // LMS sends in strm-s, combined with the live user-volume gain from audg
+    // (only when LMS signals digital volume control via the dvc flag), to
+    // decoded PCM before it reaches DirettaSync. Never applied to DSD.
+    bool enableReplayGain = false;
+
     // Logging
     bool verbose = false;
     bool quiet = false;

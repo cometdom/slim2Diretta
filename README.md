@@ -1,4 +1,4 @@
-# slim2diretta v1.4.18
+# slim2diretta v1.4.19
 
 **Native LMS Player with Diretta Output - Mono-Process Architecture**
 
@@ -8,7 +8,7 @@
 
 ---
 
-![Version](https://img.shields.io/badge/version-1.4.18-blue.svg)
+![Version](https://img.shields.io/badge/version-1.4.19-blue.svg)
 ![DSD](https://img.shields.io/badge/DSD-Native-green.svg)
 ![SDK](https://img.shields.io/badge/SDK-DIRETTA::Sync-orange.svg)
 
@@ -541,6 +541,9 @@ Options:
   --max-rate <hz>                Max PCM sample rate (default: 1536000)
   --no-dsd                       Disable DSD support
   --decoder <backend>            Decoder backend: native (default), ffmpeg
+  --enable-replaygain            Apply LMS ReplayGain + digital volume to PCM
+                                  (opt-in, off by default — breaks strict
+                                  bit-perfect playback; never applied to DSD)
 
 Diretta Advanced Options:
   --transfer-mode <mode>         Transfer scheduling mode (default: auto)
@@ -997,4 +1000,4 @@ This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) 
 
 **Enjoy native DSD and hi-res PCM streaming from your LMS library!**
 
-*Last updated: 2026-08-26 (v1.4.18)*
+*Last updated: 2026-08-27 (v1.4.19)*

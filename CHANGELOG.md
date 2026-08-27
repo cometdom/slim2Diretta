@@ -2,6 +2,12 @@
 
 All notable changes to slim2diretta are documented in this file.
 
+## v1.4.19 (2026-08-27)
+
+### Added
+
+- **ReplayGain / digital volume control (opt-in, `--enable-replaygain`)** — reported repeatedly by users (Didier/ds21 among others) that LMS's ReplayGain simply had no effect through slim2Diretta, and there was no way to control volume digitally either. Both are by design in strict bit-perfect mode: LMS doesn't bake ReplayGain into the PCM bytes it sends, even when transcoding — it sends the gain as a separate value over Slimproto (`strm-s`'s per-track ReplayGain field, and `audg`'s live user-volume gain) expecting the *player* to apply it, which slim2diretta deliberately never did. This adds an opt-in feature (off by default — default behaviour is completely unchanged) that applies both: the per-track ReplayGain LMS computes (previously parsed by nothing — the accessor existed but was never called in the `STRM_START` handler) combined with the live user-volume gain from `audg`, but only when LMS signals digital volume control via the `dvc` flag (respecting a user's choice of analog/hardware volume control when `dvc=0`, rather than double-attenuating). Applied to decoded PCM as a single 16.16 fixed-point multiply with round-to-nearest and saturation — no floating point in the hot path, consistent with the rest of the codebase. **DSD is never affected regardless of this setting** — there is no bit-perfect way to scale a 1-bit delta-sigma stream, and DSD tracks don't pass through the code path this touches at all. A gapless-transition race was caught and fixed during implementation: the next track's `STRM_START` can arrive (on the Slimproto thread) while the audio thread is still draining the *current* track's tail (the post-EOF drain loop), which could apply the wrong track's gain to a few dozen milliseconds of audio at the boundary — fixed by snapshotting the track's ReplayGain once at the start of its own processing loop, while still reading live user-volume gain per chunk so mid-track volume changes keep working normally. Enable via `--enable-replaygain` CLI flag, `SLIM2DIRETTA_OPTS` config, or the Web UI's new "ReplayGain / Digital Volume" section.
+
 ## v1.4.18 (2026-08-26)
 
 ### Added

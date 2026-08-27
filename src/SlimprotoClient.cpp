@@ -334,14 +334,14 @@ void SlimprotoClient::handleAudg(const uint8_t* data, size_t len) {
 
     uint32_t gainL = cmd.getNewGainLeft();
     uint32_t gainR = cmd.getNewGainRight();
+    bool dvc = (cmd.dvc != 0);
 
-    // Log but force 100% volume for bit-perfect
     LOG_DEBUG("[Slimproto] audg: gainL=0x" << std::hex << gainL
              << " gainR=0x" << gainR << std::dec
-             << " (ignored - bit-perfect mode)");
+             << " dvc=" << (dvc ? "1" : "0"));
 
     if (m_volumeCb) {
-        m_volumeCb(gainL, gainR);
+        m_volumeCb(gainL, gainR, dvc);
     }
 }
 
