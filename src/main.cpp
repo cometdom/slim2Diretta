@@ -213,11 +213,32 @@ static uint32_t combineGainQ16(uint32_t a, uint32_t b) {
 // Scale one int32 PCM sample by a 16.16 fixed-point gain, with round-to-
 // nearest (avoids the extra quantization noise a plain truncating shift
 // would add) and saturation against the container's full range.
+//
+// The result's low byte is then forced to zero. Every decoder in this
+// codebase outputs MSB-aligned samples (real audio in the upper 3 bytes,
+// low byte always 0 — see FlacDecoder.cpp/PcmDecoder.cpp/FfmpegDecoder.cpp),
+// and DirettaRingBuffer::detectS24PackMode() auto-detects 24-bit alignment
+// by checking whether that low byte is reliably zero across a probe window.
+// A plain round-to-nearest multiply smears real (if inaudible on its own)
+// precision into that byte, which DirettaRingBuffer.h's own comment flags
+// by name: "This happens when digital volume is applied to MSB-aligned
+// data, introducing non-zero noise in the LSB byte" — the detector then
+// returns Deferred instead of a confident MsbAligned, and if that ever
+// lands before setS24PackModeHint(MsbAligned) takes effect (or the fallback
+// path doesn't hold up in some ordering not yet fully understood), the ring
+// buffer can pack samples starting from the wrong byte — audible as heavy
+// distortion (confirmed: Dominique reproduced this on real hardware/LMS
+// before this masking was added). Zeroing the low byte here costs nothing
+// audible — 24-bit output only ever transmits the upper 3 bytes regardless
+// of alignment, so this byte is discarded either way — and keeps the
+// zero-padding invariant the whole pipeline already depends on intact,
+// making the ambiguous-detection path unreachable rather than relying on
+// the hint/fallback race to resolve it correctly every time.
 static inline int32_t scaleGainQ16(int32_t sample, uint32_t gainQ16) {
     int64_t scaled = (static_cast<int64_t>(sample) * gainQ16 + 0x8000) >> 16;
-    if (scaled > INT32_MAX) return INT32_MAX;
-    if (scaled < INT32_MIN) return INT32_MIN;
-    return static_cast<int32_t>(scaled);
+    if (scaled > INT32_MAX) scaled = INT32_MAX;
+    if (scaled < INT32_MIN) scaled = INT32_MIN;
+    return static_cast<int32_t>(static_cast<uint32_t>(scaled) & 0xFFFFFF00u);
 }
 
 // Apply the combined (track ReplayGain × user volume) gain in place to a
