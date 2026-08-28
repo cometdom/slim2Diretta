@@ -168,18 +168,18 @@ Key messages: HELO (registration), STAT (status), strm (stream control), audg (v
 
 ## Dependencies
 
-- **Diretta Host SDK v147, v148, or v149** (proprietary, not committed, personal use). Auto-detected at CMake configure time via `Host/Release.hpp` parsing — newer releases that preserve the same header layout will be picked up automatically. v149+ ships each arch variant built with both GCC15 and GCC16 (`-DARCH_NAME=`); CMake warns if the system gcc is older than the selected variant's GCC major version (only for GCC16+, since GCC15-vs-older-system has years of proven field use — see build commands above and issue #10).
+- **Diretta Host SDK v147 through v150** (proprietary, not committed, personal use). Current at time of writing: v150 — verified source-compatible (built and linked cleanly against it, no code changes needed; the only breaking API change between v149 and v150 was in `SyncBuffer`, a class this codebase never uses since it inherits `DIRETTA::Sync` directly). Auto-detected at CMake configure time via `Host/Release.hpp` parsing — newer releases that preserve the same header layout will be picked up automatically. v149+ ships each arch variant built with both GCC15 and GCC16 (`-DARCH_NAME=`); CMake warns if the system gcc is older than the selected variant's GCC major version (only for GCC16+, since GCC15-vs-older-system has years of proven field use — see build commands above and issue #10).
 - **libFLAC** (BSD-3-Clause) for FLAC decoding
 - **POSIX threads** (pthreads)
 - **C++17 runtime**
 - **Optional**: libmpg123 (MP3), libvorbis (Ogg), fdk-aac (AAC)
 - **Optional**: libavcodec + libavutil (FFmpeg decoder backend, `--decoder ffmpeg`)
 
-SDK locations searched (in order, newest version preferred):
+SDK locations searched (in order, newest version preferred — each version's full path list is tried before falling back to the next, so builders who haven't updated their SDK yet keep working against whatever they actually have installed, no action needed):
 1. `$DIRETTA_SDK_PATH`
-2. `~/DirettaHostSDK_149`, `~/DirettaHostSDK_148`, `~/DirettaHostSDK_147`
-3. `./DirettaHostSDK_149`, `./DirettaHostSDK_148`, `./DirettaHostSDK_147`
-4. `/opt/DirettaHostSDK_149`, `/opt/DirettaHostSDK_148`, `/opt/DirettaHostSDK_147`
+2. `~/DirettaHostSDK_150`, `~/DirettaHostSDK_149`, `~/DirettaHostSDK_148`, `~/DirettaHostSDK_147`
+3. `./DirettaHostSDK_150`, `./DirettaHostSDK_149`, `./DirettaHostSDK_148`, `./DirettaHostSDK_147`
+4. `/opt/DirettaHostSDK_150`, `/opt/DirettaHostSDK_149`, `/opt/DirettaHostSDK_148`, `/opt/DirettaHostSDK_147`
 
 
 ## Audio Push Strategy
