@@ -510,7 +510,17 @@ protected:
     bool getNewStream(diretta_stream& stream) override;
     bool getNewStreamCmp() override { return true; }
     bool startSyncWorker() override;
-    void statusUpdate() override {}
+
+    // Was an empty stub — Yu Harada (2026-09-06, diagnosing the same bug in
+    // DirettaRendererUPnP): "If you are handling statusUpdate in a derived
+    // class, be sure to call the statusUpdate method of the base class.
+    // Otherwise, the notification will not reach ConnectWait." Confirmed by
+    // a packet capture during a live stall on DRUP: the actual UDP
+    // negotiation with the target completes and streams normally within
+    // ~1s, continuously, for the full ~50s+ duration — connectWait() was
+    // simply never being woken up despite the connection already being
+    // good. Same architecture here, so almost certainly the same bug.
+    void statusUpdate() override { DIRETTA::Sync::statusUpdate(); }
 
 private:
     //=========================================================================
@@ -575,6 +585,19 @@ private:
     int m_targetIndex = -1;
     uint32_t m_mtuOverride = 0;
     uint32_t m_effectiveMTU = 1500;
+
+    // The format configureSinkPCM()/configureSinkDSD() determined is
+    // supported (via checkSinkSupport()'s trial-and-error), stashed here so
+    // open() can call setSinkConfigure() with it AFTER setSink() — Yu Harada
+    // (2026-09-06, diagnosing DirettaRendererUPnP): "It is assumed that
+    // Sync::setSinkConfigure is always called after Sync::setSink... I fixed
+    // an issue where [an] internal flag was not being initialized by
+    // Sync::setSink, and have now initialized it. Therefore, if you call
+    // Sync::setSink, you must also call Sync::setSinkConfigure; otherwise,
+    // the behavior will be unpredictable." Same architecture here (this file
+    // shares its Diretta bridge design with DirettaRendererUPnP), so almost
+    // certainly the same bug.
+    DIRETTA::FormatConfigure m_pendingSinkFormat;
 
     // Connection state
     std::atomic<bool> m_enabled{false};      // Target discovered, ready to use
