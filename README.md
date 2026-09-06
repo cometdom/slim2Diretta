@@ -1,4 +1,4 @@
-# slim2diretta v1.4.20
+# slim2diretta v1.4.21
 
 **Native LMS Player with Diretta Output - Mono-Process Architecture**
 
@@ -8,7 +8,7 @@
 
 ---
 
-![Version](https://img.shields.io/badge/version-1.4.20-blue.svg)
+![Version](https://img.shields.io/badge/version-1.4.21-blue.svg)
 ![DSD](https://img.shields.io/badge/DSD-Native-green.svg)
 ![SDK](https://img.shields.io/badge/SDK-DIRETTA::Sync-orange.svg)
 
@@ -192,7 +192,7 @@ Both produce lossless output; the sonic difference is subtle and comes from inte
 
 ### Software Requirements
 - **OS**: Linux with kernel 4.x+
-- **Diretta Host SDK**: Version 148 or 147 ([download here](https://www.diretta.link/hostsdk.html))
+- **Diretta Host SDK**: Version 150 (or 149/148/147, auto-detected) ([download here](https://www.diretta.link/hostsdk.html))
 - **LMS**: Lyrion Music Server 7.x+ running on your network (or Roon with Squeezebox mode)
 - **Build tools**: gcc/g++ 7.0+, make, CMake 3.10+
 - **Required library**: libFLAC
@@ -234,7 +234,7 @@ If a new release introduces a new optional dependency (e.g. a new codec or the F
 ```bash
 # 1. Download Diretta Host SDK first
 #    Visit: https://www.diretta.link/hostsdk.html
-#    Extract to: ~/DirettaHostSDK_149  (or latest version — auto-detected)
+#    Extract to: ~/DirettaHostSDK_150  (or latest version — auto-detected)
 
 # 2. Clone repository
 git clone https://github.com/cometdom/slim2diretta.git
@@ -330,10 +330,10 @@ sudo pacman -S ffmpeg
 #### 2. Download Diretta Host SDK
 
 1. Visit [diretta.link](https://www.diretta.link/hostsdk.html)
-2. Download **DirettaHostSDK_149** (or latest version — slim2diretta auto-detects 149, 148, and 147)
+2. Download **DirettaHostSDK_150** (or latest version — slim2diretta auto-detects 150, 149, 148, and 147)
 3. Extract to one of these locations:
-   - `~/DirettaHostSDK_149`
-   - `/opt/DirettaHostSDK_149`
+   - `~/DirettaHostSDK_150`
+   - `/opt/DirettaHostSDK_150`
    - Or set `DIRETTA_SDK_PATH` environment variable
 
 #### 3. Clone and Build
@@ -1000,4 +1000,4 @@ This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) 
 
 **Enjoy native DSD and hi-res PCM streaming from your LMS library!**
 
-*Last updated: 2026-08-27 (v1.4.20)*
+*Last updated: 2026-09-06 (v1.4.21)*

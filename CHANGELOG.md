@@ -2,6 +2,18 @@
 
 All notable changes to slim2diretta are documented in this file.
 
+## v1.4.21 (2026-09-06)
+
+### Fixed
+
+- **~50s connection stall on Diretta Host SDK 150.x** (PR #11). Ported from the confirmed fix on `DirettaRendererUPnP` v2.5.15 (PR #89) — same Diretta bridge architecture, down to identical function/variable names, so both of the bugs Yu Harada root-caused there were present here too. Two distinct bugs:
+  1. **`DirettaSync::statusUpdate() override` was an empty stub** (`{}`), silently swallowing the base class's notification that `Sync::connectWait()` waits on — the actual cause of the stall. Confirmed on DRUP via a live packet capture during a stall: the real UDP negotiation with the target completed and streamed normally within ~1s the entire time; `connectWait()` was simply never woken up despite the connection already being good, and sat out its full internal timeout every time. Fixed by chaining to the base class: `void statusUpdate() override { DIRETTA::Sync::statusUpdate(); }`.
+  2. **`configureSinkPCM()`/`configureSinkDSD()` called `setSinkConfigure()` before `setSink()`** — the wrong order per Yu's explicit guidance ("if you call `Sync::setSink`, you must also call `Sync::setSinkConfigure`" — after, not before). SDK 149's own uninitialized-flag bug apparently tolerated the wrong order; SDK 150 fixed that flag, exposing it. A separate, also-real correctness bug regardless of whether it contributes to the stall. The format `configureSinkPCM()`/`configureSinkDSD()` determine via `checkSinkSupport()`'s trial-and-error is now stashed in a new `m_pendingSinkFormat` member and applied via `setSinkConfigure()` once, right after `setSink()` succeeds in `open()`.
+
+  Both fixes live in the shared `diretta/` layer (`DirettaSync.h`/`.cpp`), so they also apply to any other front-end built on it. **Not yet verified against real hardware for slim2diretta specifically** — this is an untested port of the fix DRUP confirmed working on real hardware (SDK 150_4, DDC-0 target firmware 150_1). Please report back if you hit this stall on SDK 150.x.
+
+- **SDK 150 not found by auto-detection** — the hardcoded SDK search path list only checked for `_149`/`_148`/`_147` by exact directory name, so SDK 150 required setting `DIRETTA_SDK_PATH` explicitly. Added the same 6 path patterns for `_150` ahead of `_149`, keeping every older version as a fallback. Verified: full clean build (configure + compile + link) against SDK 150 with no env var override — the only breaking SDK API change (`SyncBuffer`) doesn't affect this codebase, which inherits `DIRETTA::Sync` directly.
+
 ## v1.4.20 (2026-08-27)
 
 ### Fixed
