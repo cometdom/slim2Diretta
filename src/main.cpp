@@ -44,7 +44,7 @@
 #include <sched.h>
 #include <cerrno>
 
-#define SLIM2DIRETTA_VERSION "1.4.21"
+#define SLIM2DIRETTA_VERSION "1.4.22"
 
 // Read /sys/devices/system/cpu/online and return the set of online CPU IDs.
 // Handles both ranges ("0-7") and lists ("0,2,4,6,8,10,12,14").
@@ -311,6 +311,24 @@ void signalHandler(int signal) {
 void statsSignalHandler(int /*signal*/) {
     if (g_diretta) {
         g_diretta->dumpStats();
+    }
+}
+
+// What the SDK worker thread could not log itself (no iostream on the RT
+// path). Called after every sendAudio() in the playback loops below: events
+// are raised at any time, an underrun during a drain loop included.
+static void logRtEvents(DirettaSync* sync) {
+    if (!sync) return;
+    uint32_t ev = sync->consumeRtEvents();
+    if (ev == 0) return;
+    if (ev & DirettaSync::RT_EVENT_UNDERRUN) {
+        LOG_WARN("[DirettaSync] Buffer underrun — entering rebuffering mode (avail="
+                 << sync->lastUnderrunAvail() << ")");
+    }
+    if (ev & DirettaSync::RT_EVENT_REBUFFER_COMPLETE) {
+        LOG_WARN("[DirettaSync] Rebuffering complete — resuming playback (avail="
+                 << sync->lastRebufferAvail() << ", threshold="
+                 << sync->lastRebufferThreshold() << ")");
     }
 }
 
@@ -1424,6 +1442,7 @@ int main(int argc, char* argv[]) {
                                         if (bytes == 0) break;
                                         size_t numSamples = (bytes * 8) / detectedChannels;
                                         direttaPtr->sendAudio(planarBuf, numSamples);
+                                        logRtEvents(direttaPtr);
                                         pushedDsdBytes += bytes;
                                     }
                                     direttaOpened = true;
@@ -1441,6 +1460,7 @@ int main(int argc, char* argv[]) {
                                     if (bytes > 0) {
                                         size_t numSamples = (bytes * 8) / detectedChannels;
                                         direttaPtr->sendAudio(planarBuf, numSamples);
+                                        logRtEvents(direttaPtr);
                                         pushedDsdBytes += bytes;
                                     }
                                 } else {
@@ -1842,6 +1862,7 @@ int main(int argc, char* argv[]) {
                                         size_t written = direttaPtr->sendAudio(
                                             reinterpret_cast<const uint8_t*>(sendPtr),
                                             push);
+                                        logRtEvents(direttaPtr);
                                         size_t fw = written /
                                             (sizeof(int32_t) * detectedChannels);
                                         if (fw == 0) continue;
@@ -1970,6 +1991,7 @@ int main(int argc, char* argv[]) {
                                     size_t written = direttaPtr->sendAudio(
                                         reinterpret_cast<const uint8_t*>(sendPtr),
                                         chunk);
+                                    logRtEvents(direttaPtr);
                                     size_t framesWritten = written /
                                         (sizeof(int32_t) * detectedChannels);
                                     if (framesWritten == 0) break;
@@ -2017,6 +2039,7 @@ int main(int argc, char* argv[]) {
                                     size_t written = direttaPtr->sendAudio(
                                         reinterpret_cast<const uint8_t*>(sendPtr),
                                         push);
+                                    logRtEvents(direttaPtr);
                                     size_t framesWritten = written /
                                         (sizeof(int32_t) * detectedChannels);
                                     if (framesWritten == 0) break;
@@ -2132,6 +2155,7 @@ int main(int argc, char* argv[]) {
                             size_t written = direttaPtr->sendAudio(
                                 reinterpret_cast<const uint8_t*>(sendPtr),
                                 push);
+                            logRtEvents(direttaPtr);
                             size_t framesWritten = written /
                                 (sizeof(int32_t) * detectedChannels);
                             if (framesWritten == 0) {
