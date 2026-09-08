@@ -31,6 +31,8 @@ detect_latest_sdk() {
 }
 
 SDK_PATH="${DIRETTA_SDK_PATH:-$(detect_latest_sdk)}"
+FFMPEG_BUILD_DIR="/tmp/ffmpeg-build-slim2diretta"
+FFMPEG_8_VERSION="8.1.2"
 
 # =============================================================================
 # HELPER FUNCTIONS
@@ -146,6 +148,177 @@ install_dependencies() {
     print_success "Build dependencies installed"
 }
 
+# =============================================================================
+# FFMPEG FROM SOURCE (full DSD/codec decoder set)
+# =============================================================================
+#
+# slim2diretta's own FfmpegDecoder never touches DSD codec IDs (DSD is parsed
+# natively — see DsdProcessor.cpp/DsdStreamReader.cpp), so this build isn't
+# needed for slim2diretta's own playback. It exists because `ffmpeg-free-devel`
+# below installs a *system-wide* shared library (/usr/lib64/libavcodec.so),
+# and any other program on the same host that links against system FFmpeg —
+# DirettaRendererUPnP included — inherits whatever decoder set that package
+# was built with. Confirmed 2026-09-08: Fedora's ffmpeg-free-devel omits
+# dsd_lsbf_planar/dsd_msbf_planar (the ones a real .dsf file actually needs,
+# DSF is always planar); installing it here silently broke DSD playback in
+# DirettaRendererUPnP on the same machine, overwriting a complete FFmpeg that
+# had been built from source previously. This option avoids that by building
+# the same complete decoder set DirettaRendererUPnP's own installer does.
+
+# Detect library directory (lib vs lib64)
+get_libdir() {
+    if [ -d "/usr/lib64" ] && [ "$(uname -m)" = "x86_64" ]; then
+        echo "/usr/lib64"
+    else
+        echo "/usr/lib"
+    fi
+}
+
+# Minimal FFmpeg 8.x configure options — same decoder/demuxer set as
+# DirettaRendererUPnP's install.sh, kept identical on purpose: the point is
+# for both projects to produce (and never silently downgrade) the same
+# system-wide FFmpeg when they share a host.
+get_ffmpeg_8_minimal_opts() {
+    local libdir=$(get_libdir)
+    cat <<OPTS
+--prefix=/usr
+--libdir=$libdir
+--enable-shared
+--disable-static
+--enable-lto
+--enable-gpl
+--enable-version3
+--enable-gnutls
+--disable-everything
+--disable-doc
+--disable-avdevice
+--disable-swscale
+--enable-protocol=file,http,https,tcp,udp,hls
+--enable-demuxer=flac,wav,aiff,dsf,aac,mov,mp3,ogg,hls,mpegts,pcm_s16be
+--enable-decoder=flac,alac,pcm_s16le,pcm_s24le,pcm_s32le,pcm_f32le,pcm_s16be,pcm_s24be,pcm_s32be,dsd_lsbf,dsd_msbf,dsd_lsbf_planar,dsd_msbf_planar,aac,aac_fixed,aac_latm,mp3,mp3float,vorbis
+--enable-parser=aac,aac_latm,mpegaudio,vorbis
+--enable-muxer=flac,wav
+--enable-filter=aresample
+OPTS
+}
+
+install_ffmpeg_8_build_deps() {
+    print_info "Installing minimal FFmpeg 8.x build dependencies..."
+
+    case $OS in
+        fedora|rhel|centos)
+            sudo dnf install -y --skip-unavailable \
+                gnutls-devel
+            ;;
+        ubuntu|debian)
+            sudo apt install -y \
+                libgnutls28-dev
+            ;;
+        arch|archarm|manjaro)
+            sudo pacman -Sy --needed --noconfirm \
+                gnutls
+            ;;
+    esac
+}
+
+# Warn (don't block) if total RAM is low for an LTO FFmpeg build — see
+# DirettaRendererUPnP/install.sh for the full rationale (LTO can peak at
+# 4-6 GB and gets silently OOM-killed on a swapless low-RAM host).
+check_compile_ram() {
+    local mem_kb mem_gb
+    mem_kb=$(awk '/^MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)
+    if [ -z "$mem_kb" ] || [ "$mem_kb" -eq 0 ]; then
+        return 0  # can't read, don't warn
+    fi
+    mem_gb=$(( mem_kb / 1024 / 1024 ))
+    if [ "$mem_gb" -lt 8 ]; then
+        print_warning "Low system memory detected: ${mem_gb} GB total."
+        print_warning "Building FFmpeg with LTO can peak at 4-6 GB; the linker may be OOM-killed without swap."
+        print_info    "If the build fails near the link stage, create a temporary 4 GB swap file:"
+        print_info    "  sudo fallocate -l 4G /swapfile && sudo chmod 600 /swapfile"
+        print_info    "  sudo mkswap /swapfile && sudo swapon /swapfile"
+        print_info    "Then re-run the install. After it succeeds:"
+        print_info    "  sudo swapoff /swapfile && sudo rm /swapfile"
+    fi
+}
+
+build_ffmpeg_8_minimal() {
+    local version="$1"
+
+    print_info "Building FFmpeg $version (minimal audio-only, full DSD)..."
+    check_compile_ram
+
+    install_ffmpeg_8_build_deps
+
+    mkdir -p "$FFMPEG_BUILD_DIR"
+    cd "$FFMPEG_BUILD_DIR"
+
+    local tarball="ffmpeg-${version}.tar.xz"
+    local url="https://ffmpeg.org/releases/$tarball"
+
+    if [ ! -f "$tarball" ]; then
+        print_info "Downloading FFmpeg ${version}..."
+        if ! wget -q --show-progress "$url"; then
+            print_error "Failed to download FFmpeg $version"
+            return 1
+        fi
+    fi
+
+    print_info "Extracting FFmpeg..."
+    tar xf "$tarball"
+    cd "ffmpeg-${version}"
+
+    print_info "Configuring FFmpeg (minimal audio-only, full DSD)..."
+    make distclean 2>/dev/null || true
+
+    local configure_opts
+    configure_opts=$(get_ffmpeg_8_minimal_opts | tr '\n' ' ')
+
+    ./configure $configure_opts
+
+    print_info "Building FFmpeg (this may take a while)..."
+    make -j$(nproc)
+
+    print_info "Installing FFmpeg to /usr..."
+    sudo make install
+    sudo ldconfig
+
+    cd "$SCRIPT_DIR"
+    rm -rf "$FFMPEG_BUILD_DIR"
+}
+
+# Confirms the installed FFmpeg actually has what real DSD/PCM files need —
+# in particular the _planar decoder variants (dsf is always planar), not just
+# the base ones. A build missing only the _planar pair looks fine on a naive
+# "dsd_lsbf present?" check while still failing every real .dsf file.
+test_ffmpeg_installation() {
+    local ffmpeg_bin
+    ffmpeg_bin=$(which ffmpeg 2>/dev/null || echo "")
+    if [ -z "$ffmpeg_bin" ] || [ ! -x "$ffmpeg_bin" ]; then
+        print_warning "ffmpeg binary not found in PATH — cannot verify"
+        return 1
+    fi
+
+    print_info "FFmpeg: $("$ffmpeg_bin" -version 2>&1 | head -1)"
+    print_info "Checking DSD/PCM decoders..."
+    local decoders all_found=true
+    decoders=$("$ffmpeg_bin" -decoders 2>&1)
+    for dec in dsd_lsbf dsd_msbf dsd_lsbf_planar dsd_msbf_planar flac alac pcm_s16le pcm_s24le pcm_s32le; do
+        if echo "$decoders" | grep -q " $dec "; then
+            echo "  [OK] $dec"
+        else
+            echo "  [MISSING] $dec"
+            all_found=false
+        fi
+    done
+
+    if [ "$all_found" = true ]; then
+        print_success "All required decoders found"
+    else
+        print_warning "Some decoders are missing — DSD playback may fail on other programs sharing this FFmpeg"
+    fi
+}
+
 install_optional_codecs() {
     print_header "Installing Optional Codec Libraries"
 
@@ -168,42 +341,68 @@ install_optional_codecs() {
         4|*) print_info "Skipping optional codecs"; return 0 ;;
     esac
 
+    # FFmpeg is a system-wide shared library: a plain package install here
+    # can silently replace a more complete FFmpeg another program on this
+    # host (DirettaRendererUPnP included) was relying on for DSD — see the
+    # comment above build_ffmpeg_8_minimal(). Ask before touching it.
+    local ffmpeg_from_source=false
+    if $install_ffmpeg; then
+        echo ""
+        echo "FFmpeg is a shared system library — installing the distro package"
+        echo "can silently replace a more complete build another program on this"
+        echo "host (e.g. DirettaRendererUPnP) may depend on for DSD playback."
+        echo ""
+        echo "  1) Build from source (full DSD decoders — recommended if you also"
+        echo "     run DirettaRendererUPnP, or any other Diretta renderer, here)"
+        echo "  2) Distro package (fast, but its DSD decoder support varies)"
+        echo ""
+        read -rp "Choice [1-2] (default: 1): " ffmpeg_choice
+        ffmpeg_choice=${ffmpeg_choice:-1}
+        [ "$ffmpeg_choice" = "1" ] && ffmpeg_from_source=true
+    fi
+
     case $OS in
         fedora|rhel|centos)
             local pkgs=""
             if $install_codecs; then
                 pkgs="mpg123-devel libvorbis-devel fdk-aac-free-devel"
             fi
-            if $install_ffmpeg; then
+            if $install_ffmpeg && ! $ffmpeg_from_source; then
                 pkgs="$pkgs ffmpeg-free-devel"
             fi
-            print_info "Installing: $pkgs"
-            # --allowerasing lets dnf retire conflicting FFmpeg packages
-            # (e.g. ffmpeg-devel from RPM Fusion already installed) when the
-            # user picks ffmpeg-free-devel, or vice-versa on a re-run.
-            sudo dnf install -y --allowerasing $pkgs
+            if [ -n "$pkgs" ]; then
+                print_info "Installing: $pkgs"
+                # --allowerasing lets dnf retire conflicting FFmpeg packages
+                # (e.g. ffmpeg-devel from RPM Fusion already installed) when
+                # the user picks ffmpeg-free-devel, or vice-versa on a re-run.
+                sudo dnf install -y --allowerasing $pkgs
+            fi
             ;;
         ubuntu|debian)
             local pkgs=""
             if $install_codecs; then
                 pkgs="libmpg123-dev libvorbis-dev libfdk-aac-dev"
             fi
-            if $install_ffmpeg; then
+            if $install_ffmpeg && ! $ffmpeg_from_source; then
                 pkgs="$pkgs libavcodec-dev libavutil-dev"
             fi
-            print_info "Installing: $pkgs"
-            sudo apt install -y $pkgs
+            if [ -n "$pkgs" ]; then
+                print_info "Installing: $pkgs"
+                sudo apt install -y $pkgs
+            fi
             ;;
         arch|archarm|manjaro)
             local pkgs=""
             if $install_codecs; then
                 pkgs="mpg123 libvorbis libfdk-aac"
             fi
-            if $install_ffmpeg; then
+            if $install_ffmpeg && ! $ffmpeg_from_source; then
                 pkgs="$pkgs ffmpeg"
             fi
-            print_info "Installing: $pkgs"
-            sudo pacman -Sy --needed --noconfirm $pkgs
+            if [ -n "$pkgs" ]; then
+                print_info "Installing: $pkgs"
+                sudo pacman -Sy --needed --noconfirm $pkgs
+            fi
             ;;
         *)
             print_warning "Unsupported distribution for automatic codec install"
@@ -211,12 +410,19 @@ install_optional_codecs() {
             if $install_codecs; then
                 print_info "  - libmpg123-dev, libvorbis-dev, libfdk-aac-dev"
             fi
-            if $install_ffmpeg; then
+            if $install_ffmpeg && ! $ffmpeg_from_source; then
                 print_info "  - libavcodec-dev, libavutil-dev (FFmpeg)"
             fi
-            return 0
+            if ! $ffmpeg_from_source; then
+                return 0
+            fi
             ;;
     esac
+
+    if $ffmpeg_from_source; then
+        build_ffmpeg_8_minimal "$FFMPEG_8_VERSION"
+        test_ffmpeg_installation
+    fi
 
     print_success "Optional codec libraries installed"
     print_info "Rebuild slim2diretta for changes to take effect"
