@@ -2,6 +2,12 @@
 
 All notable changes to slim2diretta are documented in this file.
 
+## v1.4.23 (2026-09-08)
+
+### Added
+
+- **`install.sh` now offers building FFmpeg from source with the full DSD decoder set**, instead of only ever installing the distro package (`ffmpeg-free-devel` on Fedora). slim2diretta itself never needs FFmpeg's DSD decoders — DSD is parsed natively — but that package installs a system-wide shared library, and any other program on the same host that links against system FFmpeg (`DirettaRendererUPnP` included) inherits whatever decoder set it was built with. Root cause of a same-day incident: Fedora's `ffmpeg-free-devel` omits `dsd_lsbf_planar`/`dsd_msbf_planar` (the ones a real `.dsf` file actually needs); installing it via this script silently replaced a complete FFmpeg that had been built from source, breaking DSD playback in DirettaRendererUPnP on the same machine. `build_ffmpeg_8_minimal()` is ported from DirettaRendererUPnP's own `install.sh` (same decoder/demuxer list on purpose), offered as the default choice, with an explicit warning before falling back to the distro package.
+
 ## v1.4.22 (2026-09-08)
 
 ### Fixed
