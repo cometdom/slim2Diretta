@@ -2,6 +2,17 @@
 
 All notable changes to slim2diretta are documented in this file.
 
+## v1.4.22 (2026-09-08)
+
+### Fixed
+
+- **Three bugs ported from DirettaRendererUPnP v2.5.16 (PR #95)** — found while checking whether DRUP's latest release could also affect this codebase, since the shared `diretta/` layer (`DirettaSync.cpp/h`, `DirettaRingBuffer.h`) is a copy of DRUP's, not a symlink, and had not been re-synced against these particular fixes:
+  1. **S24 alignment hint didn't survive `clear()`** — `clear()` (called on every `resize()`, but also on any resume that doesn't go through a full `open()`) reset `m_s24Hint` to `Unknown` along with the rest of the S24 detection state. A resume during a quiet passage could then time out into the wrong alignment with no hint left to fall back on — full-scale noise once real audio returned, on a codebase where every decoder is actually always MSB-aligned. Fixed: `clear()` now keeps the hint (`m_s24PackMode = m_s24Hint` instead of `Unknown`); only `resize()` forgets it, since a new format is the one case where the caller genuinely re-sets it via `setS24PackModeHint()` right after. The blind fallback default (when even the hint is unset) was also flipped from `LsbAligned` to `MsbAligned`, matching what every decoder here produces.
+  2. **`configureSinkPCM()` crashed the whole process on total negotiation failure** — `throw std::runtime_error("No supported PCM format found")`, uncaught by any of the three `open()` call sites in `main.cpp`. Now returns `bool`; `open()` returns `false` and the existing per-track failure handling takes it from there, same as `configureSinkDSD()` already did. Also switched from the old flat 32→24→16 fallback order to one that depends on the source depth (32-bit source: 32→24→16; 24-bit: 24→32→16; 16-bit: 24→16→32) — 32-bit is still never offered *first* to a 16/24-bit source (the existing guard against DACs that announce 32-bit but are physically 24-bit), but it's now tried as a genuine last resort instead of refused outright, which is lossless for us and beats a 16-bit truncation on a sink that refuses 24-bit.
+  3. **`getNewStream()` (the SDK's real-time worker thread) called `LOG_WARN` directly** for underrun/rebuffering-complete — a `std::cout`, i.e. a mutex, a possible page fault and a `write(2)` syscall from inside the audio callback. It now only raises bits in a new atomic mailbox (`DirettaSync::consumeRtEvents()`), drained by a new `logRtEvents()` helper in `main.cpp` called right after every `sendAudio()` in the playback loops (6 call sites — this codebase doesn't have a single per-buffer consumer thread the way DRUP's `audioThreadFunc()` does).
+
+  Verified: clean rebuild with zero warnings against SDK 150 (`cmake .. && make`), and each fix checked directly against the equivalent, already-shipped DRUP code before porting — no unit test suite in this repo to run against (DRUP's `DirettaRingBuffer.h`/`DirettaSync.cpp` tests don't apply to this codebase's own copy).
+
 ## v1.4.21 (2026-09-06)
 
 ### Fixed

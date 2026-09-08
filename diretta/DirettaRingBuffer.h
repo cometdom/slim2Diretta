@@ -147,7 +147,11 @@ public:
         mask_ = size_ - 1;
         buffer_.resize(size_);
         silenceByte_.store(silenceByte, std::memory_order_release);
-        clear();  // Resets all S24 state - hint will be set by caller via setS24PackModeHint()
+        // A resize is a new format: forget the S24 hint (the caller re-sets it
+        // via setS24PackModeHint() right after). clear() alone must NOT forget
+        // it — see clear().
+        m_s24Hint = S24PackMode::Unknown;
+        clear();
         fillWithSilence();
     }
 
@@ -175,10 +179,13 @@ public:
     void clear() {
         writePos_.store(0, std::memory_order_release);
         readPos_.store(0, std::memory_order_release);
-        // Reset all S24 state to allow fresh detection for new tracks
-        // New track will set hint via setS24PackModeHint() if available
-        m_s24PackMode = S24PackMode::Unknown;
-        m_s24Hint = S24PackMode::Unknown;
+        // Restart S24 detection but KEEP the hint: clear() is also called on
+        // pause -> resume, which does not re-open the track and therefore
+        // never re-sets the hint. Forgetting it here made a resume during a
+        // quiet passage time out into the wrong alignment — full-scale white
+        // noise until the next track. The hint is only forgotten by resize()
+        // (new format), where the caller re-sets it via setS24PackModeHint().
+        m_s24PackMode = m_s24Hint;
         m_s24DetectionConfirmed = false;
         m_deferredSampleCount = 0;
     }
@@ -366,18 +373,22 @@ public:
             } else {
                 // Still silence - accumulate count for timeout
                 m_deferredSampleCount += numSamples;
-                // Timeout: if still silent after threshold, use hint or default to LSB
+                // Timeout: if still silent after threshold, use hint or default
+                // to MSB — the only alignment any of our decoders actually
+                // produce (all setS24PackModeHint() call sites pass MsbAligned);
+                // LSB as a blind default was always wrong here, it just never
+                // showed unless the hint was also missing.
                 if (m_deferredSampleCount > DEFERRED_TIMEOUT_SAMPLES) {
-                    m_s24PackMode = (m_s24Hint != S24PackMode::Unknown) ? m_s24Hint : S24PackMode::LsbAligned;
+                    m_s24PackMode = (m_s24Hint != S24PackMode::Unknown) ? m_s24Hint : S24PackMode::MsbAligned;
                     m_s24DetectionConfirmed = true;
                 }
             }
         }
 
-        // Use effective mode for conversion (Deferred/Unknown use hint or LSB as fallback)
+        // Use effective mode for conversion (Deferred/Unknown use hint or MSB as fallback)
         S24PackMode effectiveMode = m_s24PackMode;
         if (effectiveMode == S24PackMode::Deferred || effectiveMode == S24PackMode::Unknown) {
-            effectiveMode = (m_s24Hint != S24PackMode::Unknown) ? m_s24Hint : S24PackMode::LsbAligned;
+            effectiveMode = (m_s24Hint != S24PackMode::Unknown) ? m_s24Hint : S24PackMode::MsbAligned;
         }
 
         size_t stagedBytes = (effectiveMode == S24PackMode::MsbAligned)

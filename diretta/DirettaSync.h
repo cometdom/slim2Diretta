@@ -433,6 +433,27 @@ public:
     void dumpStats() const;
 
     /**
+     * @brief Events raised by the SDK worker thread, to be logged elsewhere.
+     *
+     * getNewStream() runs on the SDK's real-time thread: it must never touch
+     * iostreams (mutex + possible page fault + write(2) to a journal pipe).
+     * It only sets bits here; the consumer (main loop) drains them and does
+     * the LOG_WARN. Values attached to the events are the most recent ones.
+     */
+    enum RtEvent : uint32_t {
+        RT_EVENT_UNDERRUN          = 1u << 0,  // Entered rebuffering
+        RT_EVENT_REBUFFER_COMPLETE = 1u << 1,  // Left rebuffering
+    };
+    uint32_t consumeRtEvents() {
+        // Plain load first: the common case is "nothing", no RMW on a line the worker writes
+        if (m_rtEvents.load(std::memory_order_relaxed) == 0) return 0;
+        return m_rtEvents.exchange(0, std::memory_order_acq_rel);
+    }
+    size_t lastUnderrunAvail() const { return m_rtUnderrunAvail.load(std::memory_order_relaxed); }
+    size_t lastRebufferAvail() const { return m_rtRebufferAvail.load(std::memory_order_relaxed); }
+    size_t lastRebufferThreshold() const { return m_rtRebufferThreshold.load(std::memory_order_relaxed); }
+
+    /**
      * @brief Check if prefill is complete (ring buffer has enough data to start playback)
      * @return true if prefill threshold has been reached
      *
@@ -535,7 +556,7 @@ private:
     void shutdownWorker();
     bool joinWorkerWithTimeout(int timeoutMs = 1000);  // Timed worker thread join
 
-    void configureSinkPCM(int rate, int channels, int inputBits, int& acceptedBits);
+    bool configureSinkPCM(int rate, int channels, int inputBits, int& acceptedBits);
     bool configureSinkDSD(uint32_t dsdBitRate, int channels, const AudioFormat& format);
     void configureRingPCM(int rate, int channels, int direttaBps, int inputBps, bool isCompressed, bool isDoP);
 
@@ -725,6 +746,14 @@ private:
     std::atomic<int> m_pushCount{0};
     std::atomic<uint32_t> m_underrunCount{0};
     std::atomic<bool> m_rebuffering{false};              // Rebuffering after sustained underrun
+
+    // Worker → consumer event mailbox (see consumeRtEvents()), on its own
+    // cache line: the consumer polls it while the worker writes m_streamCount
+    // / reads m_prefillComplete on every call.
+    alignas(64) std::atomic<uint32_t> m_rtEvents{0};
+    std::atomic<size_t> m_rtUnderrunAvail{0};
+    std::atomic<size_t> m_rtRebufferAvail{0};
+    std::atomic<size_t> m_rtRebufferThreshold{0};
 };
 
 #endif // DIRETTA_SYNC_H
