@@ -165,9 +165,17 @@ install_dependencies() {
 # had been built from source previously. This option avoids that by building
 # the same complete decoder set DirettaRendererUPnP's own installer does.
 
-# Detect library directory (lib vs lib64)
+# Detect library directory (lib vs lib64). Fedora/RHEL use /usr/lib64 on
+# every 64-bit arch they ship (x86_64, aarch64, ppc64le), not just x86_64 —
+# gating this on uname -m = x86_64 sends aarch64 Fedora hosts (Raspberry Pi)
+# down the /usr/lib path while pkg-config still only searches /usr/lib64,
+# breaking downstream FFmpeg version detection for anything that later reads
+# pkg-config on this host (same bug hit DirettaRendererUPnP's install.sh on
+# Fedora 44 aarch64, 2026-09-09 — fixed there identically).
+# Debian/Ubuntu (any arch) don't have a real /usr/lib64, so this still falls
+# through to /usr/lib there exactly as before.
 get_libdir() {
-    if [ -d "/usr/lib64" ] && [ "$(uname -m)" = "x86_64" ]; then
+    if [ -d "/usr/lib64" ]; then
         echo "/usr/lib64"
     else
         echo "/usr/lib"

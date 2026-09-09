@@ -2,6 +2,12 @@
 
 All notable changes to slim2diretta are documented in this file.
 
+## v1.4.24 (2026-09-09)
+
+### Fixed
+
+- **`install.sh`'s `get_libdir()` sent Fedora aarch64 hosts (Raspberry Pi) to the wrong FFmpeg library directory**. Fedora/RHEL use `/usr/lib64` on every 64-bit architecture they ship — x86_64, aarch64, ppc64le — not just x86_64, but `get_libdir()` only routed there when `uname -m = x86_64`; on aarch64 a from-source FFmpeg build installed to `/usr/lib` instead, where `pkg-config` (which only searches `/usr/lib64/pkgconfig` on Fedora) can't find it. Same bug found and fixed in DirettaRendererUPnP's `install.sh` (reported there by simonhiggs, where it additionally tripped a false "FFmpeg version mismatch" build abort — no equivalent guard exists in this project's CMake build, so the practical effect here is just `pkg-config`/downstream tooling not finding the library, not a build failure). `get_libdir()` now checks only for `/usr/lib64`'s existence; Debian/Ubuntu, which don't have a real `/usr/lib64` on any arch, are unaffected.
+
 ## v1.4.23 (2026-09-08)
 
 ### Added
