@@ -2,6 +2,12 @@
 
 All notable changes to slim2diretta are documented in this file.
 
+## v1.4.25 (2026-09-22)
+
+### Fixed
+
+- **Clicks when PCM playback is cut or restarted in the middle of the music**, ported from DirettaRendererUPnP PR #98 (herisson-88) — same root cause, same architecture (`getNewStream()` inherits `DIRETTA::Sync` directly in both projects), same fix. `getNewStream()` used to jump straight from a music buffer to a zero silence buffer and back on Stop, Pause and a track skip — a step in the waveform, heard as a click. New `diretta/PcmFade.h` (copied unchanged from DRUP): 10 ms smoothstep ramps, exact Q16 integer gain, no allocation in the callback thread. Fade-out now runs before every shutdown silence (`close()`, `stopPlayback()`, `pausePlayback()`, the same-format quick-resume path in `open()`) via `requestShutdownSilence()`/`fadeOutBuffer()`; a companion fix, `playOutShutdownSilence()`, drops the ring as soon as the worker reaches actual silence instead of leaving it full of stale music that a callback landing in a narrow timing window could replay at full level. Fade-in runs on the first music buffers after a resume from pause and at the end of a rebuffering. DoP is untouched: `pausePlayback()`/`stopPlayback()`/`resumePlayback()` already bypass this whole mechanism for DoP (the SDK is kept running to preserve the marker stream), and the new `pcmFadeLayout()` additionally gates on `m_cachedDopSilence` as defense in depth. No seek-flush equivalent to `flushForSeek()` exists in this project, so that part of the DRUP fix does not apply here. `kill -USR1`/`dumpStats()` now reports fade-out/fade-in counters. Verified: clean build against SDK 149 and SDK 150.
+
 ## v1.4.24 (2026-09-09)
 
 ### Fixed

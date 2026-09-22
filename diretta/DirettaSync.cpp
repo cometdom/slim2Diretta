@@ -7,6 +7,7 @@
  */
 
 #include "DirettaSync.h"
+#include "PcmFade.h"
 #include <stdexcept>
 #include <iomanip>
 #include <sstream>
@@ -468,6 +469,7 @@ bool DirettaSync::open(const AudioFormat& format) {
     // stopPlayback() racing this open() during rapid seeks — caused a deadlock
     // that froze playback until a service restart).
     std::lock_guard<std::recursive_mutex> controlLock(m_controlMutex);
+    m_fadeInRequest.store(FADE_CANCEL, std::memory_order_release);  // a track opened here starts bit-exact
 
     std::cout << "[DirettaSync] ========== OPEN ==========" << std::endl;
     std::cout << "[DirettaSync] Format: " << format.sampleRate << "Hz/"
@@ -566,15 +568,7 @@ bool DirettaSync::open(const AudioFormat& format) {
                 // 4. Restart playback
                 // Without stop(), stale data from the previous track can leak
                 // through between the silence phase and the buffer clear.
-                {
-                    int silenceCount = m_isDsdMode.load(std::memory_order_acquire) ? 30 : 10;
-                    requestShutdownSilence(silenceCount);
-                    auto start = std::chrono::steady_clock::now();
-                    while (m_silenceBuffersRemaining.load(std::memory_order_acquire) > 0) {
-                        if (std::chrono::steady_clock::now() - start > std::chrono::milliseconds(100)) break;
-                        std::this_thread::yield();
-                    }
-                }
+                playOutShutdownSilence(m_isDsdMode.load(std::memory_order_acquire) ? 30 : 10, 100);
 
                 // Stop SDK playback — this is what pause does and what makes
                 // pause/unpause work reliably. Prevents getNewStream() calls
@@ -989,16 +983,7 @@ void DirettaSync::close() {
     }
 
     // Request shutdown silence
-    requestShutdownSilence(m_isDsdMode.load(std::memory_order_acquire) ? 50 : 20);
-
-    auto start = std::chrono::steady_clock::now();
-    while (m_silenceBuffersRemaining.load(std::memory_order_acquire) > 0) {
-        if (std::chrono::steady_clock::now() - start > std::chrono::milliseconds(150)) {
-            DIRETTA_LOG("Silence timeout");
-            break;
-        }
-        std::this_thread::yield();
-    }
+    playOutShutdownSilence(m_isDsdMode.load(std::memory_order_acquire) ? 50 : 20, 150);
 
     m_stopRequested = true;
 
@@ -1556,13 +1541,7 @@ void DirettaSync::stopPlayback(bool immediate) {
     }
 
     if (!immediate) {
-        requestShutdownSilence(m_isDsdMode.load(std::memory_order_acquire) ? 50 : 20);
-
-        auto start = std::chrono::steady_clock::now();
-        while (m_silenceBuffersRemaining.load() > 0) {
-            if (std::chrono::steady_clock::now() - start > std::chrono::milliseconds(150)) break;
-            std::this_thread::yield();
-        }
+        playOutShutdownSilence(m_isDsdMode.load(std::memory_order_acquire) ? 50 : 20, 150);
     }
 
     stop();
@@ -1585,13 +1564,7 @@ void DirettaSync::pausePlayback() {
         return;
     }
 
-    requestShutdownSilence(m_isDsdMode.load(std::memory_order_acquire) ? 30 : 10);
-
-    auto start = std::chrono::steady_clock::now();
-    while (m_silenceBuffersRemaining.load() > 0) {
-        if (std::chrono::steady_clock::now() - start > std::chrono::milliseconds(80)) break;
-        std::this_thread::yield();
-    }
+    playOutShutdownSilence(m_isDsdMode.load(std::memory_order_acquire) ? 30 : 10, 80);
 
     stop();
     m_paused = true;
@@ -1630,6 +1603,7 @@ void DirettaSync::resumePlayback() {
     // Clear stale buffer data and require fresh prefill
     m_ringBuffer.clear();
     m_prefillComplete = false;
+    m_fadeInRequest.store(FADE_ARM, std::memory_order_release);  // resumes in the middle of the music
 
     play();
     m_paused = false;
@@ -1780,6 +1754,9 @@ void DirettaSync::dumpStats() const {
     std::cout << "  Streams:     " << m_streamCount.load(std::memory_order_relaxed) << std::endl;
     std::cout << "  Pushes:      " << m_pushCount.load(std::memory_order_relaxed) << std::endl;
     std::cout << "  Underruns:   " << m_underrunCount.load(std::memory_order_relaxed) << std::endl;
+    std::cout << "  Fade-outs:   " << m_fadeOutsCompleted.load(std::memory_order_relaxed) << " complete, "
+              << m_fadeOutsSkipped.load(std::memory_order_relaxed) << " skipped; fade-ins: "
+              << m_fadeInsCompleted.load(std::memory_order_relaxed) << " (since start)" << std::endl;
     std::cout << "════════════════════════════════════════\n" << std::endl;
 }
 
@@ -1842,6 +1819,7 @@ bool DirettaSync::getNewStream(diretta_stream& baseStream) {
         m_cachedConsumerSampleRate = m_sampleRate.load(std::memory_order_acquire);
         // PCM buffer rounding drift fix values (stable per-track)
         m_cachedBytesPerFrame = m_bytesPerFrame.load(std::memory_order_acquire);
+        m_cachedConsumerChannels = m_channels.load(std::memory_order_acquire);
         m_cachedFramesPerBufferRemainder = m_framesPerBufferRemainder.load(std::memory_order_acquire);
 
         // DoP mode: drives both the silence fill and the per-frame marker
@@ -1907,6 +1885,12 @@ bool DirettaSync::getNewStream(diretta_stream& baseStream) {
     // Shutdown silence
     int silenceRemaining = m_silenceBuffersRemaining.load(std::memory_order_acquire);
     if (silenceRemaining > 0) {
+        // PCM: the last music buffers go out through a fade-out first, so the
+        // silence starts from zero instead of cutting the waveform (click)
+        if (fadeOutBuffer(dest, currentBytesPerBuffer)) {
+            m_workerActive = false;
+            return true;
+        }
         fillSilence(dest, currentBytesPerBuffer);
         m_silenceBuffersRemaining.fetch_sub(1, std::memory_order_acq_rel);
         m_workerActive = false;
@@ -2005,6 +1989,9 @@ bool DirettaSync::getNewStream(diretta_stream& baseStream) {
             m_rtRebufferAvail.store(avail, std::memory_order_relaxed);
             m_rtRebufferThreshold.store(threshold, std::memory_order_relaxed);
             m_rtEvents.fetch_or(RT_EVENT_REBUFFER_COMPLETE, std::memory_order_release);
+            // The music comes back mid-waveform: fade it in
+            m_fadeInFramesTotal = PcmFade::fadeFramesForRate(m_cachedConsumerSampleRate);
+            m_fadeInFramesRemaining = m_fadeInFramesTotal;
             // Fall through to normal pop below
         } else {
             fillSilence(dest, currentBytesPerBuffer);
@@ -2028,6 +2015,12 @@ bool DirettaSync::getNewStream(diretta_stream& baseStream) {
 
     // Pop from ring buffer
     m_ringBuffer.pop(dest, currentBytesPerBuffer);
+
+    // Fade-in: requested by resume/rebuffering-complete, picked up here on the
+    // first music buffer (DoP excluded inside pcmFadeLayout())
+    if (m_fadeInRequest.load(std::memory_order_relaxed) != 0 || m_fadeInFramesRemaining != 0) {
+        fadeInBuffer(dest, currentBytesPerBuffer);
+    }
 
     // DoP: rewrite each frame's marker to continue the alternating 0x05/0xFA
     // sequence shared with the silence path (payload preserved). Keeps the
@@ -2147,6 +2140,122 @@ bool DirettaSync::joinWorkerWithTimeout(int timeoutMs) {
     return !m_workerActive.load(std::memory_order_acquire);
 }
 
+// PCM fades (PcmFade.h), callback thread only, out of line. Ported from
+// DirettaRendererUPnP PR #98 (herisson-88).
+
+// Layout of a callback buffer, false when it cannot be scaled: DSD, DoP
+// (m_cachedDopSilence — its marker-carrying frames must never be scaled), or
+// not whole frames of 16/24/32-bit samples.
+bool DirettaSync::pcmFadeLayout(int bytes, int& channels, int& bytesPerSample, size_t& frames) const {
+    if (m_cachedConsumerIsDsd || m_cachedDopSilence) return false;
+    channels = m_cachedConsumerChannels;
+    int bytesPerFrame = m_cachedBytesPerFrame;
+    if (channels <= 0 || bytesPerFrame <= 0 || bytes <= 0 || bytes % bytesPerFrame != 0) return false;
+    bytesPerSample = bytesPerFrame / channels;
+    frames = static_cast<size_t>(bytes / bytesPerFrame);
+    return bytesPerSample >= 2 && bytesPerSample <= 4;
+}
+
+// Shutdown silence pending: pops the next music buffer through the fade-out.
+// False once the ramp is over, or when there is nothing to fade (nothing was
+// playing, ring dry, format that cannot be scaled): the caller sends silence.
+bool DirettaSync::fadeOutBuffer(uint8_t* dest, int bytes) {
+    if (m_fadeOutRequest.exchange(0, std::memory_order_acq_rel) == FADE_ARM) {
+        m_fadeOutFramesTotal = PcmFade::fadeFramesForRate(m_cachedConsumerSampleRate);
+        m_fadeOutFramesRemaining = m_fadeOutFramesTotal;
+    }
+    if (m_fadeOutFramesRemaining == 0) return false;
+
+    int channels = 0, bytesPerSample = 0;
+    size_t frames = 0;
+    bool playing = pcmFadeLayout(bytes, channels, bytesPerSample, frames) &&
+                   !m_stopRequested.load(std::memory_order_acquire) &&
+                   m_prefillComplete.load(std::memory_order_acquire) &&
+                   m_postOnlineDelayDone.load(std::memory_order_acquire) &&
+                   !m_rebuffering.load(std::memory_order_acquire) &&
+                   m_ringBuffer.getAvailable() >= static_cast<size_t>(bytes);
+    if (playing) {
+        m_ringBuffer.pop(dest, bytes);
+        // DoP pre-encoded by the media server must not be scaled: leave it to the silence
+        bool firstBuffer = (m_fadeOutFramesRemaining == m_fadeOutFramesTotal);
+        if (!(firstBuffer && PcmFade::looksLikeDoP(dest, frames, channels, bytesPerSample))) {
+            PcmFade::applyFadeOut(dest, frames, channels, bytesPerSample,
+                                  m_fadeOutFramesRemaining, m_fadeOutFramesTotal);
+            if (m_fadeOutFramesRemaining == 0) {
+                m_fadeOutsCompleted.fetch_add(1, std::memory_order_relaxed);
+            }
+            return true;
+        }
+    }
+    m_fadeOutFramesRemaining = 0;
+    m_fadeOutsSkipped.fetch_add(1, std::memory_order_relaxed);
+    return false;
+}
+
+// Music buffer just popped: picks up a fade-in request and runs the ramp
+void DirettaSync::fadeInBuffer(uint8_t* dest, int bytes) {
+    uint32_t request = m_fadeInRequest.exchange(0, std::memory_order_acq_rel);
+    if (request == FADE_CANCEL) {
+        m_fadeInFramesRemaining = 0;
+        return;
+    }
+    if (request == FADE_ARM) {
+        m_fadeInFramesTotal = PcmFade::fadeFramesForRate(m_cachedConsumerSampleRate);
+        m_fadeInFramesRemaining = m_fadeInFramesTotal;
+    }
+    if (m_fadeInFramesRemaining == 0) return;
+
+    int channels = 0, bytesPerSample = 0;
+    size_t frames = 0;
+    bool firstBuffer = (m_fadeInFramesRemaining == m_fadeInFramesTotal);
+    if (!pcmFadeLayout(bytes, channels, bytesPerSample, frames) ||
+        (firstBuffer && PcmFade::looksLikeDoP(dest, frames, channels, bytesPerSample))) {
+        m_fadeInFramesRemaining = 0;   // cannot be scaled (DoP pre-encoded by the server included)
+        return;
+    }
+    PcmFade::applyFadeIn(dest, frames, channels, bytesPerSample,
+                         m_fadeInFramesRemaining, m_fadeInFramesTotal);
+    if (m_fadeInFramesRemaining == 0) {
+        m_fadeInsCompleted.fetch_add(1, std::memory_order_relaxed);
+    }
+}
+
+// Empties the ring with the worker fenced out; the prefill restarts
+void DirettaSync::dropRing() {
+    std::lock_guard<std::mutex> lock(m_configMutex);
+    ReconfigureGuard guard(*this);
+    m_ringBuffer.clear();
+    m_prefillComplete = false;
+    m_rebuffering.store(false, std::memory_order_relaxed);
+}
+
+// Shutdown silence, played out: PCM fade-out, then `buffers` of silence. The
+// ring is dropped as soon as the worker is on silence. It used to stay full of
+// music, which the worker popped again, at full level, if a callback came in
+// after the count had run out and before stop() took effect; every restart
+// path throws that content away anyway (open(), resumePlayback()).
+void DirettaSync::playOutShutdownSilence(int buffers, int timeoutMs) {
+    requestShutdownSilence(buffers);
+    const int requested = m_silenceBuffersRemaining.load(std::memory_order_acquire);
+    bool ringDropped = false;
+
+    auto start = std::chrono::steady_clock::now();
+    for (;;) {
+        int remaining = m_silenceBuffersRemaining.load(std::memory_order_acquire);
+        if (!ringDropped && remaining < requested) {   // first silence buffer sent: the ramp is over
+            dropRing();
+            ringDropped = true;
+        }
+        if (remaining <= 0) break;
+        if (std::chrono::steady_clock::now() - start > std::chrono::milliseconds(timeoutMs)) {
+            DIRETTA_LOG("Silence timeout");
+            break;
+        }
+        std::this_thread::yield();
+    }
+    if (!ringDropped) dropRing();   // worker not running
+}
+
 void DirettaSync::requestShutdownSilence(int buffers) {
     // N7: Scale silence buffers with DSD rate for consistent flush timing
     // Higher DSD rates have deeper pipelines requiring more buffers
@@ -2156,6 +2265,10 @@ void DirettaSync::requestShutdownSilence(int buffers) {
         int dsdMultiplier = sampleRate / 2822400;  // DSD64=1, DSD512=8
         scaledBuffers = buffers * std::max(1, dsdMultiplier);
     }
+
+    // Fade-out before the silence. Stored before the silence count:
+    // getNewStream() reads it once it sees the count.
+    m_fadeOutRequest.store(FADE_ARM, std::memory_order_release);
 
     m_silenceBuffersRemaining = scaledBuffers;
     m_draining = true;

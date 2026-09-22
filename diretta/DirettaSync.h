@@ -583,6 +583,14 @@ private:
     bool waitForOnline(unsigned int timeoutMs);
     void logSinkCapabilities();
 
+    // PCM fades around cuts in the middle of the music (PcmFade.h), ported
+    // from DirettaRendererUPnP PR #98. Callback-thread only, out of line.
+    void playOutShutdownSilence(int buffers, int timeoutMs);  // + drops the ring behind it
+    void dropRing();
+    bool pcmFadeLayout(int bytes, int& channels, int& bytesPerSample, size_t& frames) const;
+    bool fadeOutBuffer(uint8_t* dest, int bytes);
+    void fadeInBuffer(uint8_t* dest, int bytes);
+
     class ReconfigureGuard {
     public:
         explicit ReconfigureGuard(DirettaSync& sync) : sync_(sync) { sync_.beginReconfigure(); }
@@ -721,6 +729,7 @@ private:
     bool m_cachedConsumerIsDsd{false};
     int m_cachedConsumerSampleRate{44100};
     int m_cachedBytesPerFrame{0};
+    int m_cachedConsumerChannels{2};
     uint32_t m_cachedFramesPerBufferRemainder{0};
     // DoP output marker continuity (v1.4.4). When the stream is DoP, every
     // output frame's marker byte (the 24-bit MSB) is (re)written to a strictly
@@ -741,11 +750,30 @@ private:
     std::atomic<int> m_silenceBuffersRemaining{0};
     std::atomic<int> m_stabilizationCount{0};
 
+    // PCM fade-in request (hot: tested every getNewStream() call). ARM/CANCEL
+    // written by the control thread (open/resumePlayback), consumed only by
+    // the callback thread; m_fadeInFramesRemaining is plain (owned exclusively
+    // by that thread), like m_stabilizationCount above.
+    static constexpr uint32_t FADE_ARM = 1;
+    static constexpr uint32_t FADE_CANCEL = 2;
+    std::atomic<uint32_t> m_fadeInRequest{0};
+    uint32_t m_fadeInFramesRemaining = 0;
+
     // Statistics
     std::atomic<int> m_streamCount{0};
     std::atomic<int> m_pushCount{0};
     std::atomic<uint32_t> m_underrunCount{0};
     std::atomic<bool> m_rebuffering{false};              // Rebuffering after sustained underrun
+
+    // PCM fade-out request + counters (cold: only touched around a shutdown
+    // silence, a rebuffer, or dumpStats()).
+    std::atomic<uint32_t> m_fadeOutRequest{0};
+    uint32_t m_fadeOutFramesTotal = 0;
+    uint32_t m_fadeOutFramesRemaining = 0;
+    uint32_t m_fadeInFramesTotal = 0;
+    std::atomic<uint32_t> m_fadeOutsCompleted{0};
+    std::atomic<uint32_t> m_fadeOutsSkipped{0};
+    std::atomic<uint32_t> m_fadeInsCompleted{0};
 
     // Worker → consumer event mailbox (see consumeRtEvents()), on its own
     // cache line: the consumer polls it while the worker writes m_streamCount
