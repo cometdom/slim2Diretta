@@ -2,6 +2,12 @@
 
 All notable changes to slim2diretta are documented in this file.
 
+## v1.4.26 (2026-09-30)
+
+### Fixed
+
+- **WebUI: `_send_redirect()` could 500 on a non-ASCII flash message, and Restart/Stop never worked on OpenRC** (issue #99 on DirettaRendererUPnP, harmonyosnews — this project shares the identical `webui/diretta_webui.py` codebase). Two independent bugs: (1) `http.server` encodes response headers as latin-1, so any accented character in a save/restart/stop message raised `UnicodeEncodeError`, turning the 303 redirect into a 500 — now percent-encoded via `urllib.parse.quote()`, keeping `/?&=` unescaped so the query string stays intact; (2) `restart_service()`/`stop_service()` were hardcoded to `systemctl`, so the buttons silently did nothing on GentooPlayer/Gentoo/Alpine (OpenRC) — ported slim2UPnP's already-proven `shutil.which()`-based systemd/rc-service detection. Same two fixes ported to DirettaRendererUPnP.
+
 ## v1.4.25 (2026-09-22)
 
 ### Fixed
