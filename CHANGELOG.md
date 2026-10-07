@@ -2,6 +2,12 @@
 
 All notable changes to slim2diretta are documented in this file.
 
+## v1.4.27 (2026-10-07)
+
+### Fixed
+
+- **SDK 155 source compatibility**, ported from DirettaRendererUPnP v2.5.23 — same root cause and fix (both projects inherit `DIRETTA::Sync` directly). Four breaking API changes in Diretta Host SDK revision 155, resolved at compile time via SFINAE/`if constexpr`, so `diretta/DirettaSync.cpp` builds unmodified against SDK 149, 150 and 155 — no version pinning needed: (1) `Sync::open()` gained a trailing `bool diswork` parameter, no default (two call sites here, `openSyncConnection()` and `reopenForFormatChange()`, both need the explicit `static_cast<DIRETTA::Sync&>(*this)` since `DirettaSync::open(const AudioFormat&)` hides the SDK's `open()` by name); (2) `Sync::Info::supportMSmode` (a bitmask field on SDK ≤150) became three separate boolean methods (`checkSinkSupportMSmode1()`/`2()`/`3()`); (3) `Find::Setting::Name` was removed outright with no replacement — purely cosmetic (3 of 4 construction sites in this codebase never set it anyway). Verified: clean build against SDK 149, 150 and 155.
+
 ## v1.4.26 (2026-09-30)
 
 ### Fixed

@@ -13,6 +13,8 @@
 #include <sstream>
 #include <pthread.h>
 #include <sched.h>
+#include <type_traits>
+#include <utility>
 
 // Parse comma-separated core list (e.g. "6,7,8") into a vector of ints.
 // Returns empty vector on parse error or empty input.
@@ -103,6 +105,77 @@ private:
     std::atomic<int>& users_;
     bool active_;
 };
+
+// SDK 155 broke source compatibility in three places (ported here from
+// DirettaRendererUPnP v2.5.23, same root cause/fix — both projects inherit
+// DIRETTA::Sync directly). Resolved at compile time via SFINAE/if constexpr
+// so this file keeps building unmodified against SDK <=150 and 155+ alike.
+
+// 1. Sync::open() gained a trailing bool diswork ("Enforce a workaround
+// during disconnection"), no default value. `false` matches what
+// DirettaRendererUPnP, a private sibling project and a private sibling project all pass, to stay
+// closest to pre-155 behavior.
+template <typename S, typename = void>
+struct SdkHasDiswork : std::false_type {};
+template <typename S>
+struct SdkHasDiswork<S, std::void_t<decltype(std::declval<S&>().open(
+    std::declval<typename S::THRED_MODE>(), std::declval<ACQUA::Clock>(),
+    std::declval<uint16_t>(), std::declval<const std::string&>(),
+    std::declval<std::uint64_t>(), std::declval<int>(), std::declval<int>(),
+    std::declval<int>(), std::declval<typename S::MSMODE>(), std::declval<bool>()))>>
+    : std::true_type {};
+
+template <typename S>
+static bool sdkOpen(S& sync, typename S::THRED_MODE mode, ACQUA::Clock info, uint16_t ifno,
+                     const std::string& name, std::uint64_t id, int cpuMain, int cpuOther,
+                     int rngOther, typename S::MSMODE msMode) {
+    if constexpr (SdkHasDiswork<S>::value) {
+        return sync.open(mode, info, ifno, name, id, cpuMain, cpuOther, rngOther, msMode, false);
+    } else {
+        return sync.open(mode, info, ifno, name, id, cpuMain, cpuOther, rngOther, msMode);
+    }
+}
+
+// 2. Sync::Info::supportMSmode (a uint16_t bitmask field, bit0=MS1/bit1=MS2/
+// bit2=MS3 on SDK <=150) became three boolean methods
+// (checkSinkSupportMSmode1()/2()/3()) on SDK 155, field gone. Reconstruct
+// the bitmask either way so existing bit-check logic doesn't need to change.
+template <typename I, typename = void>
+struct SdkHasMSmodeField : std::false_type {};
+template <typename I>
+struct SdkHasMSmodeField<I, std::void_t<decltype(std::declval<const I&>().supportMSmode)>>
+    : std::true_type {};
+
+template <typename I>
+static uint16_t sdkMSmodeBitmask(const I& info) {
+    if constexpr (SdkHasMSmodeField<I>::value) {
+        return info.supportMSmode;
+    } else {
+        return (info.checkSinkSupportMSmode1() ? 0x01 : 0) |
+               (info.checkSinkSupportMSmode2() ? 0x02 : 0) |
+               (info.checkSinkSupportMSmode3() ? 0x04 : 0);
+    }
+}
+
+// 3. Find::Setting::Name removed outright on SDK 155, no replacement.
+// Purely a self-identification string for the discovery request: 3 of this
+// file's 4 Find::Setting construction sites never set it anyway and work
+// fine without it. Set it only where the field exists.
+template <typename T, typename = void>
+struct SdkHasFindSettingName : std::false_type {};
+template <typename T>
+struct SdkHasFindSettingName<T, std::void_t<decltype(std::declval<T&>().Name)>>
+    : std::true_type {};
+
+template <typename T>
+static void setFindSettingNameIfPresent(T& settings, const char* name) {
+    if constexpr (SdkHasFindSettingName<T>::value) {
+        settings.Name = name;
+    } else {
+        (void)settings;
+        (void)name;
+    }
+}
 } // namespace
 
 //=============================================================================
@@ -208,7 +281,10 @@ bool DirettaSync::openSyncConnection() {
             DIRETTA_LOG("open() retry #" << attempt);
             std::this_thread::sleep_for(std::chrono::milliseconds(DirettaRetry::OPEN_DELAY_MS));
         }
-        opened = DIRETTA::Sync::open(
+        // Explicit cast: DirettaSync declares its own open(const AudioFormat&),
+        // which hides DIRETTA::Sync::open() by name — sdkOpen()'s SFINAE probe
+        // and its sync.open(...) call both need S deduced as DIRETTA::Sync.
+        opened = sdkOpen(static_cast<DIRETTA::Sync&>(*this),
             DIRETTA::Sync::THRED_MODE(threadMode),
             infoCycle, 0, "slim2diretta", 0x44525400,
             sdkCpuAudio, sdkCpuOther, 0, DIRETTA::Sync::MSMODE_AUTO);
@@ -249,7 +325,7 @@ bool DirettaSync::discoverTarget(std::atomic<bool>* stopSignal) {
         DIRETTA::Find::Setting findSettings;
         findSettings.Loopback = false;
         findSettings.ProductID = 0;
-        findSettings.Name = "slim2diretta";
+        setFindSettingNameIfPresent(findSettings, "slim2diretta");
         findSettings.MyID = 0x44525400;
 
         DIRETTA::Find find(findSettings);
@@ -438,7 +514,7 @@ void DirettaSync::logSinkCapabilities() {
     // supportMSmode is a bitmask: bit0=MS1, bit1=MS2, bit2=MS3
     // This field is populated by the SDK after the first connection completes,
     // so it reads 0 on the very first track.
-    uint16_t msmode = info.supportMSmode;
+    uint16_t msmode = sdkMSmodeBitmask(info);
     if (msmode != 0) {
         std::cout << "[DirettaSync]   MS modes supported: "
                   << ((msmode & 0x01) ? "MS1 " : "")
@@ -596,7 +672,7 @@ bool DirettaSync::open(const AudioFormat& format) {
             // Log MS mode on quick resume — supportMSmode is populated after first session
             if (g_logLevel >= LogLevel::DEBUG) {
                 const auto& info = getSinkInfo();
-                uint16_t msmode = info.supportMSmode;
+                uint16_t msmode = sdkMSmodeBitmask(info);
                 if (msmode != 0) {
                     const char* activeMode = "NONE";
                     if (msmode & 0x04) activeMode = "MS3";
@@ -834,7 +910,7 @@ bool DirettaSync::open(const AudioFormat& format) {
         // Log MS mode after reopen — supportMSmode may now be populated
         if (g_logLevel >= LogLevel::DEBUG && m_hasPreviousFormat) {
             const auto& info = getSinkInfo();
-            uint16_t msmode = info.supportMSmode;
+            uint16_t msmode = sdkMSmodeBitmask(info);
             if (msmode != 0) {
                 const char* activeMode = "NONE";
                 if (msmode & 0x04) activeMode = "MS3";
@@ -1068,7 +1144,7 @@ bool DirettaSync::reopenForFormatChange() {
     if (sdkCpuAudio >= 0) {
         threadMode |= 16;  // OCCUPIED
     }
-    if (!DIRETTA::Sync::open(
+    if (!sdkOpen(static_cast<DIRETTA::Sync&>(*this),
             DIRETTA::Sync::THRED_MODE(threadMode),
             infoCycle, 0, "slim2diretta", 0x44525400,
             sdkCpuAudio, sdkCpuOther, 0, DIRETTA::Sync::MSMODE_AUTO)) {

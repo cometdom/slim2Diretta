@@ -16,7 +16,7 @@ if(DEFINED ENV{LLVM} OR LLVM)
     set(USE_LLD    ON CACHE BOOL "Use lld linker with clang"     FORCE)
 endif()
 
-project(slim2diretta VERSION 1.4.26)
+project(slim2diretta VERSION 1.4.27)
 
 set(CMAKE_CXX_STANDARD 17)
 
@@ -167,11 +167,17 @@ if(DEFINED ENV{DIRETTA_SDK_PATH})
     set(SDK_PATH $ENV{DIRETTA_SDK_PATH})
     message(STATUS "Using SDK from environment: ${SDK_PATH}")
 else()
-    # Search in common locations (newest first: 150, 149, 148, 147). Each
+    # Search in common locations (newest first: 155, 150, 149, 148, 147). Each
     # version is tried in full before falling back to the next, so anyone
     # who hasn't updated their SDK yet keeps building against whichever
     # version they actually have installed - no action needed on their part.
     set(SDK_SEARCH_PATHS
+        "$ENV{HOME}/DirettaHostSDK_155"
+        "${CMAKE_SOURCE_DIR}/DirettaHostSDK_155"
+        "${CMAKE_SOURCE_DIR}/../DirettaHostSDK_155"
+        "/opt/DirettaHostSDK_155"
+        "$ENV{HOME}/audio/DirettaHostSDK_155"
+        "/usr/local/DirettaHostSDK_155"
         "$ENV{HOME}/DirettaHostSDK_150"
         "${CMAKE_SOURCE_DIR}/DirettaHostSDK_150"
         "${CMAKE_SOURCE_DIR}/../DirettaHostSDK_150"
