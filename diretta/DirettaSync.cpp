@@ -113,8 +113,7 @@ private:
 
 // 1. Sync::open() gained a trailing bool diswork ("Enforce a workaround
 // during disconnection"), no default value. `false` matches what
-// DirettaRendererUPnP, a private sibling project and a private sibling project all pass, to stay
-// closest to pre-155 behavior.
+// DirettaRendererUPnP passes, to stay closest to pre-155 behavior.
 template <typename S, typename = void>
 struct SdkHasDiswork : std::false_type {};
 template <typename S>
