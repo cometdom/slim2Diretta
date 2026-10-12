@@ -179,41 +179,39 @@ size_t FlacDecoder::readDecoded(int32_t* out, size_t maxFrames) {
         size_t inputAvailable = m_inputBuffer.size() - m_inputPos;
         if (inputAvailable == 0 && !m_eof) break;
 
-        if (!FLAC__stream_decoder_process_single(m_decoder)) {
-            FLAC__StreamDecoderState state = FLAC__stream_decoder_get_state(m_decoder);
+        // The state must be checked regardless of the return value:
+        // process_single() returns true when the read callback aborts
+        // during the frame-sync search, and keeps returning true without
+        // doing anything while the decoder stays ABORTED — the loop would
+        // then spin at 100% CPU with no output (GitHub issue #14).
+        FLAC__bool ok = FLAC__stream_decoder_process_single(m_decoder);
+        FLAC__StreamDecoderState state = FLAC__stream_decoder_get_state(m_decoder);
 
-            if (state == FLAC__STREAM_DECODER_END_OF_STREAM) {
-                m_finished = true;
-                break;
-            }
-
-            if (state == FLAC__STREAM_DECODER_ABORTED) {
-                // Rollback to last confirmed frame boundary
-                size_t confirmedBufPos = static_cast<size_t>(
-                    m_confirmedAbsolutePos - m_tellOffset);
-                m_inputPos = confirmedBufPos;
-
-                if (!m_eof && !m_error) {
-                    FLAC__stream_decoder_flush(m_decoder);
-                    break;  // Wait for more input
-                }
-                // At EOF with incomplete frame — stream truncated
-                LOG_WARN("[FLAC] Stream ended with incomplete frame");
-                m_finished = true;
-                break;
-            }
-
-            // Other error
-            LOG_ERROR("[FLAC] Decoder error state: "
-                      << FLAC__StreamDecoderStateString[state]);
-            m_error = true;
+        if (state == FLAC__STREAM_DECODER_END_OF_STREAM) {
+            m_finished = true;
             break;
         }
 
-        // Check for end of stream after successful process
-        FLAC__StreamDecoderState state = FLAC__stream_decoder_get_state(m_decoder);
-        if (state == FLAC__STREAM_DECODER_END_OF_STREAM) {
+        if (state == FLAC__STREAM_DECODER_ABORTED) {
+            // Rollback to last confirmed frame boundary
+            size_t confirmedBufPos = static_cast<size_t>(
+                m_confirmedAbsolutePos - m_tellOffset);
+            m_inputPos = confirmedBufPos;
+
+            if (!m_eof && !m_error) {
+                FLAC__stream_decoder_flush(m_decoder);
+                break;  // Wait for more input
+            }
+            // At EOF with incomplete frame — stream truncated
+            LOG_WARN("[FLAC] Stream ended with incomplete frame");
             m_finished = true;
+            break;
+        }
+
+        if (!ok) {
+            LOG_ERROR("[FLAC] Decoder error state: "
+                      << FLAC__StreamDecoderStateString[state]);
+            m_error = true;
             break;
         }
 
