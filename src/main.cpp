@@ -44,7 +44,7 @@
 #include <sched.h>
 #include <cerrno>
 
-#define SLIM2DIRETTA_VERSION "1.4.27"
+#define SLIM2DIRETTA_VERSION "1.4.28"
 
 // Read /sys/devices/system/cpu/online and return the set of online CPU IDs.
 // Handles both ranges ("0-7") and lists ("0,2,4,6,8,10,12,14").
@@ -1553,6 +1553,13 @@ int main(int argc, char* argv[]) {
                     constexpr size_t DECODE_CACHE_MAX_SAMPLES = 9216000;
                     std::vector<int32_t> decodeCache;
                     size_t decodeCachePos = 0;
+                    // End (sample index into decodeCache) of the previous
+                    // track's audio when chaining gaplessly. PHASE 1b decodes
+                    // the next track's first frames into the shared cache
+                    // before PHASE 2 detects a format change, so the format-
+                    // change drain must stop here — anything past it is
+                    // new-format audio for the reopened sink (issue #15).
+                    size_t prevTrackCacheEnd = 0;
                     bool direttaOpened = false;
                     AudioFormat audioFmt{};
                     int detectedChannels = 2;
@@ -1561,6 +1568,13 @@ int main(int argc, char* argv[]) {
                     auto cacheFrames = [&]() -> size_t {
                         return (decodeCache.size() - decodeCachePos) /
                                std::max(detectedChannels, 1);
+                    };
+                    // Frames of the previous track still in the cache
+                    auto oldFrames = [&]() -> size_t {
+                        return decodeCachePos < prevTrackCacheEnd
+                            ? (prevTrackCacheEnd - decodeCachePos) /
+                              std::max(detectedChannels, 1)
+                            : 0;
                     };
 
                     while (true) {  // === PCM/FLAC CHAINING LOOP ===
@@ -1843,8 +1857,8 @@ int main(int argc, char* argv[]) {
                                         << audioFmt.channels << " -> "
                                         << fmt.sampleRate << "/"
                                         << fmt.channels << "), draining "
-                                        << cacheFrames() << " old frames");
-                                    while (cacheFrames() > 0 &&
+                                        << oldFrames() << " old frames");
+                                    while (oldFrames() > 0 &&
                                            audioTestRunning.load(
                                                std::memory_order_acquire)) {
                                         if (direttaPtr->getBufferLevel() > 0.95f) {
@@ -1852,7 +1866,7 @@ int main(int argc, char* argv[]) {
                                                 std::chrono::milliseconds(1));
                                             continue;
                                         }
-                                        size_t push = std::min(cacheFrames(),
+                                        size_t push = std::min(oldFrames(),
                                                                MAX_DECODE_FRAMES);
                                         const int32_t* sendPtr = prepareForSend(
                                             decodeCache.data() + decodeCachePos, push,
@@ -2086,6 +2100,8 @@ int main(int argc, char* argv[]) {
                         if (decodeCachePos > 500000) {
                             decodeCache.erase(decodeCache.begin(),
                                 decodeCache.begin() + decodeCachePos);
+                            prevTrackCacheEnd -= std::min(prevTrackCacheEnd,
+                                                          decodeCachePos);
                             decodeCachePos = 0;
                         }
 
@@ -2235,6 +2251,7 @@ int main(int argc, char* argv[]) {
                                     decodeCache.begin() + decodeCachePos);
                                 decodeCachePos = 0;
                             }
+                            prevTrackCacheEnd = decodeCache.size();
                             continue;  // Loop back for next PCM/FLAC track
                         }
                         // Cross-format (PCM→DSD): can't chain

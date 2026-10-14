@@ -236,6 +236,10 @@ Both factors combine (`combineGainQ16()`, a 16.16×16.16 fixed-point multiply) i
 - **`format=d` (DSD)**: Always uses native DSD path (raw bitstream, not decoded).
 - **`format=f` (FLAC), MP3, AAC, OGG**: Use FFmpeg when `--decoder ffmpeg` is active, native otherwise.
 
+## FLAC Decoder Notes
+
+**ABORTED is sticky and `process_single()` hides it (v1.4.28, issue #14)**: libFLAC's `process_single()` returns `true` when the read callback aborts during the frame-sync search, and keeps returning `true` (doing nothing) while the state stays `ABORTED`. `FlacDecoder::readDecoded()` therefore checks the decoder state after *every* call, whatever it returns — checking only on `false` let the loop spin at 100% CPU once more input arrived. Do not revert to a return-value-only check.
+
 ## FFmpeg Notes
 
 **Parser flush at EOF**: `av_parser_parse2()` buffers partial codec frames; must flush with `(NULL, 0)` before flushing the decoder to recover the last audio frame (critical for gapless transitions).
@@ -288,6 +292,7 @@ Roon (and some LMS DSD plugins) send DSD as **DoP** over Slimproto with format c
 - **STMd timing**: Sent at HTTP EOF, but decode cache may still have seconds of audio buffered — LMS handles track counter advancement
 - **Clean end-of-track**: After gapless wait timeout (no next track), `stopPlayback(false)` sends silence buffers before the ring buffer drains. Prevents underruns that Roon interprets as errors (refusing to start the next track). LMS tolerates underruns; Roon does not.
 - **open() failure in gapless**: If `open()` fails during a format change in gapless chaining, `openFailedInGapless` flag prevents STMu from being sent after STMn. Without this, LMS receives STMn+STMu and skips to the next track.
+- **Format-change drain bounded to the previous track (v1.4.28, issue #15)**: PHASE 1b decodes the next track's first frames into the shared cache *before* PHASE 2 detects a format change, so the drain must not empty the whole cache. `prevTrackCacheEnd` (sample index, set when chaining, adjusted on PHASE 6 compaction) marks where the old track ends; `oldFrames()` bounds the drain to it, and the new track's frames stay for the reopened sink's prebuffer.
 - **Timed worker join**: `joinWorkerWithTimeout(1000ms)` replaces bare `m_workerThread.join()` in all format transition paths to prevent indefinite blocking when the SDK worker is unresponsive.
 
 ## Web UI
