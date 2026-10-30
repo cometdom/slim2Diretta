@@ -2,6 +2,12 @@
 
 All notable changes to slim2diretta are documented in this file.
 
+## v1.4.29 (2026-10-30)
+
+### Fixed
+
+- **Left/right channels could end up swapped after a partial ring-buffer write**, ported from DirettaRendererUPnP v2.5.16 (PR #95, "whole-frame ring pushes" — the one part of that PR the v1.4.22 port had left out). The PCM push helpers in `DirettaRingBuffer` (`push24BitPacked()`, `push16To32()`, `push16To24()`, `push()`) limited a write to what fit in the ring per *sample* (per byte for the direct copy), and `getFreeSpace()` keeps one byte in reserve, so a nearly full ring could accept an odd number of samples on a stereo stream. Callers in `main.cpp` advance only by whole frames, so the leftover sample was sent again on the next push and every following frame came out shifted by one channel — left and right swapped until the next `open()`. Unlikely with the default 3 s buffer (every push is gated on a ≤95% buffer level, which leaves far more than one chunk of room), but reachable with a small `--pcm-buffer-seconds`. Fixed: the helpers take the channel count (frame size for `push()`) and only ever write whole frames; `DirettaSync::sendAudio()` passes it. Raised while investigating a channel-swap report (Meridimac, RPi5 Host + RPi4 target on diretta-alsa-target 148_21); whether this is the cause there is still unconfirmed.
+
 ## v1.4.28 (2026-10-14)
 
 ### Fixed
