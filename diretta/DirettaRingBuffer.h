@@ -308,10 +308,11 @@ public:
      * Optimized path: uses direct write when contiguous space available,
      * avoiding the check-then-copy overhead of the wraparound case.
      */
-    size_t push(const uint8_t* data, size_t len) {
+    size_t push(const uint8_t* data, size_t len, size_t frameBytes = 1) {
         if (size_ == 0) return 0;
         size_t free = getFreeSpace();
         if (len > free) len = free;
+        if (frameBytes > 1) len -= len % frameBytes;
         if (len == 0) return 0;
 
         // Fast path: try direct write (no wraparound)
@@ -345,7 +346,7 @@ public:
      * 2. Hint from FFmpeg metadata used as fallback for silence
      * 3. Timeout defaults to LSB after ~1 second of silence
      */
-    size_t push24BitPacked(const uint8_t* data, size_t inputSize) {
+    size_t push24BitPacked(const uint8_t* data, size_t inputSize, size_t channels = 1) {
         if (size_ == 0) return 0;
         size_t numSamples = inputSize / 4;
         if (numSamples == 0) return 0;
@@ -356,6 +357,7 @@ public:
 
         if (numSamples > maxSamples) numSamples = maxSamples;
         if (numSamples > maxSamplesByFree) numSamples = maxSamplesByFree;
+        if (channels > 1) numSamples -= numSamples % channels;  // whole frames only
         if (numSamples == 0) return 0;
 
         prefetch_audio_buffer(data, numSamples * 4);
@@ -404,7 +406,7 @@ public:
      * @brief Push with 16-to-32 bit upsampling
      * @return Input bytes consumed
      */
-    size_t push16To32(const uint8_t* data, size_t inputSize) {
+    size_t push16To32(const uint8_t* data, size_t inputSize, size_t channels = 1) {
         if (size_ == 0) return 0;
         size_t numSamples = inputSize / 2;
         if (numSamples == 0) return 0;
@@ -415,6 +417,7 @@ public:
 
         if (numSamples > maxSamples) numSamples = maxSamples;
         if (numSamples > maxSamplesByFree) numSamples = maxSamplesByFree;
+        if (channels > 1) numSamples -= numSamples % channels;  // whole frames only
         if (numSamples == 0) return 0;
 
         prefetch_audio_buffer(data, numSamples * 2);
@@ -433,7 +436,7 @@ public:
      * Converts 16-bit samples to packed 24-bit format.
      * Used when sink only supports 24-bit (not 32-bit).
      */
-    size_t push16To24(const uint8_t* data, size_t inputSize) {
+    size_t push16To24(const uint8_t* data, size_t inputSize, size_t channels = 1) {
         if (size_ == 0) return 0;
         size_t numSamples = inputSize / 2;
         if (numSamples == 0) return 0;
@@ -444,6 +447,7 @@ public:
 
         if (numSamples > maxSamples) numSamples = maxSamples;
         if (numSamples > maxSamplesByFree) numSamples = maxSamplesByFree;
+        if (channels > 1) numSamples -= numSamples % channels;  // whole frames only
         if (numSamples == 0) return 0;
 
         prefetch_audio_buffer(data, numSamples * 2);

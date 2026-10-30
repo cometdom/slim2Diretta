@@ -1746,7 +1746,7 @@ size_t DirettaSync::sendAudio(const uint8_t* data, size_t numSamples) {
         size_t bytesPerFrame = 4 * numChannels;  // S24_P32
         totalBytes = numSamples * bytesPerFrame;
 
-        written = m_ringBuffer.push24BitPacked(data, totalBytes);
+        written = m_ringBuffer.push24BitPacked(data, totalBytes, numChannels);
         formatLabel = "PCM24";
 
     } else if (upsample16to32) {
@@ -1754,7 +1754,7 @@ size_t DirettaSync::sendAudio(const uint8_t* data, size_t numSamples) {
         size_t bytesPerFrame = 2 * numChannels;
         totalBytes = numSamples * bytesPerFrame;
 
-        written = m_ringBuffer.push16To32(data, totalBytes);
+        written = m_ringBuffer.push16To32(data, totalBytes, numChannels);
         formatLabel = "PCM16->32";
 
     } else if (upsample16to24) {
@@ -1762,7 +1762,7 @@ size_t DirettaSync::sendAudio(const uint8_t* data, size_t numSamples) {
         size_t bytesPerFrame = 2 * numChannels;
         totalBytes = numSamples * bytesPerFrame;
 
-        written = m_ringBuffer.push16To24(data, totalBytes);
+        written = m_ringBuffer.push16To24(data, totalBytes, numChannels);
         formatLabel = "PCM16->24";
 
     } else {
@@ -1770,7 +1770,7 @@ size_t DirettaSync::sendAudio(const uint8_t* data, size_t numSamples) {
         size_t bytesPerFrame = static_cast<size_t>(bytesPerSample) * numChannels;
         totalBytes = numSamples * bytesPerFrame;
 
-        written = m_ringBuffer.push(data, totalBytes);
+        written = m_ringBuffer.push(data, totalBytes, bytesPerFrame);
         formatLabel = "PCM";
     }
 
