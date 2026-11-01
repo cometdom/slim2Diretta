@@ -44,7 +44,7 @@
 #include <sched.h>
 #include <cerrno>
 
-#define SLIM2DIRETTA_VERSION "1.4.29"
+#define SLIM2DIRETTA_VERSION "1.4.30"
 
 // Read /sys/devices/system/cpu/online and return the set of online CPU IDs.
 // Handles both ranges ("0-7") and lists ("0,2,4,6,8,10,12,14").
@@ -721,10 +721,10 @@ Config parseArguments(int argc, char* argv[]) {
                       << "  --cpu-other <core[,core...]>   Pin main + slimproto threads to core(s)\n"
                       << "\n"
                       << "Buffer configuration (0 = use defaults):\n"
-                      << "  --pcm-buffer-seconds <s>       PCM buffer size in seconds (default 0.5)\n"
+                      << "  --pcm-buffer-seconds <s>       PCM buffer size in seconds (default 3, 6 above 176 kHz)\n"
                       << "  --dsd-buffer-seconds <s>       DSD buffer size in seconds (default 0.8)\n"
-                      << "  --pcm-prefill-ms <ms>          PCM prefill in ms (default 80)\n"
-                      << "  --dsd-prefill-ms <ms>          DSD prefill in ms (default 200)\n"
+                      << "  --pcm-prefill-ms <ms>          PCM prefill in ms (default 500, FLAC/compressed 800; 1000/1500 above 176 kHz)\n"
+                      << "  --dsd-prefill-ms <ms>          DSD prefill in ms (default 150)\n"
                       << "\n"
                       << "Audio:\n"
                       << "  --max-rate <hz>        Max sample rate (default: 1536000)\n"
@@ -1658,6 +1658,7 @@ int main(int argc, char* argv[]) {
                     // freeze playback until a manual service restart.
                     constexpr int FORMAT_DETECT_TIMEOUT_MS = 10000;
                     auto formatDetectStart = std::chrono::steady_clock::now();
+                    uint64_t formatDetectStartBytes = 0;
 
                     // Mid-stream stall recovery: the safety net above only covers a
                     // stall BEFORE the format is known. Once playback has started, a
@@ -1670,11 +1671,12 @@ int main(int argc, char* argv[]) {
                     // Some sources legitimately deliver in bursts with gaps longer
                     // than MIDSTREAM_STALL_TIMEOUT_MS between HTTP reads (observed
                     // with BBC iPlayer via Lyrion's plugin relay) while decodeCache
-                    // still holds many seconds of already-decoded audio. Reconnecting
-                    // on raw byte-arrival timing alone false-positives on those gaps
-                    // and needlessly recreates the decoder, causing an audible click
-                    // per gap. Only actually reconnect once the cache is genuinely
-                    // running low, regardless of how long the HTTP side has been quiet.
+                    // and the ring still hold many seconds of already-decoded audio.
+                    // Reconnecting on raw byte-arrival timing alone false-positives
+                    // on those gaps and needlessly recreates the decoder, causing an
+                    // audible click per gap. Only actually reconnect once the buffered
+                    // audio is genuinely running low, regardless of how long the HTTP
+                    // side has been quiet.
                     constexpr double MIDSTREAM_STALL_MIN_CACHE_SEC = 3.0;
                     auto lastDataTime = std::chrono::steady_clock::now();
                     int reconnectAttempts = 0;
@@ -1738,7 +1740,8 @@ int main(int argc, char* argv[]) {
                                 std::chrono::milliseconds(FORMAT_DETECT_TIMEOUT_MS)) {
                             LOG_WARN("[Audio] Stream stalled: no decodable format within "
                                      << (FORMAT_DETECT_TIMEOUT_MS / 1000) << "s of connect ("
-                                     << totalBytes << " bytes received) — aborting to recover");
+                                     << (totalBytes - formatDetectStartBytes)
+                                     << " bytes received) — aborting to recover");
                             slimproto->sendStat(StatEvent::STMn);
                             httpStream->disconnect();
                             {
@@ -1751,18 +1754,30 @@ int main(int argc, char* argv[]) {
                         }
 
                         // ========== Mid-stream stall recovery ==========
-                        if (formatLogged) {
+                        // A reconnect that recreated the decoder clears formatLogged.
+                        // Keep retrying from here while that re-detection gets no
+                        // data; once attempts run out, the format safety net above
+                        // does the clean abort.
+                        if (formatLogged ||
+                            (reconnectAttempts > 0 &&
+                             reconnectAttempts < MIDSTREAM_MAX_RECONNECTS)) {
                             if (gotData) {
                                 lastDataTime = std::chrono::steady_clock::now();
                                 reconnectAttempts = 0;
                             } else if (!httpEof && httpStream->isConnected()) {
                                 auto stalledMs = std::chrono::duration_cast<std::chrono::milliseconds>(
                                     std::chrono::steady_clock::now() - lastDataTime).count();
-                                double cacheSec = audioFmt.sampleRate > 0
-                                    ? static_cast<double>(cacheFrames()) / audioFmt.sampleRate
-                                    : 0.0;
+                                double bufferedSec = 0.0;
+                                if (stalledMs > MIDSTREAM_STALL_TIMEOUT_MS) {
+                                    bufferedSec = audioFmt.sampleRate > 0
+                                        ? static_cast<double>(cacheFrames()) / audioFmt.sampleRate
+                                        : 0.0;
+                                    if (direttaOpened) {
+                                        bufferedSec += direttaPtr->getBufferedSeconds();
+                                    }
+                                }
                                 if (stalledMs > MIDSTREAM_STALL_TIMEOUT_MS &&
-                                    cacheSec <= MIDSTREAM_STALL_MIN_CACHE_SEC) {
+                                    bufferedSec <= MIDSTREAM_STALL_MIN_CACHE_SEC) {
                                     if (reconnectAttempts < MIDSTREAM_MAX_RECONNECTS) {
                                         ++reconnectAttempts;
                                         LOG_WARN("[Audio] Stream stalled " << stalledMs
@@ -1786,6 +1801,7 @@ int main(int argc, char* argv[]) {
                                                     decoder = std::move(freshDecoder);
                                                     formatLogged = false;
                                                     formatDetectStart = std::chrono::steady_clock::now();
+                                                    formatDetectStartBytes = totalBytes;
                                                     skipGaplessCompareOnRedetect = true;
                                                 } else {
                                                     LOG_ERROR("[Audio] Failed to recreate "

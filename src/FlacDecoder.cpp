@@ -81,6 +81,14 @@ void FlacDecoder::setEof() {
 size_t FlacDecoder::readDecoded(int32_t* out, size_t maxFrames) {
     if (m_error || m_finished) return 0;
 
+    // Metadata retries recreate the libFLAC decoder, so only retry once more
+    // input has arrived (a silent stream would otherwise do this every poll).
+    if (!m_metadataDone && !m_eof &&
+        (m_inputBuffer.empty() ||
+         (m_metadataRetries > 0 && m_inputBuffer.size() == m_metadataAttemptSize))) {
+        return 0;
+    }
+
     // Lazy init on first decode attempt
     if (!m_initialized) {
         if (!initDecoder()) return 0;
@@ -108,6 +116,7 @@ size_t FlacDecoder::readDecoded(int32_t* out, size_t maxFrames) {
                 m_decoder = nullptr;
                 m_initialized = false;
                 m_metadataRetries++;
+                m_metadataAttemptSize = m_inputBuffer.size();
                 // Log first attempt and then only every 50th to avoid spam
                 // (Qobuz streams with large album art can need 100+ retries)
                 if (m_metadataRetries == 1) {
@@ -280,6 +289,7 @@ void FlacDecoder::flush() {
     m_eof = false;
     m_decodedSamples = 0;
     m_metadataRetries = 0;
+    m_metadataAttemptSize = 0;
 }
 
 // ============================================
