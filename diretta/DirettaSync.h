@@ -429,6 +429,7 @@ public:
     size_t sendAudio(const uint8_t* data, size_t numSamples);
 
     float getBufferLevel() const;
+    double getBufferedSeconds() const;  // PCM audio currently in the ring
     const AudioFormat& getFormat() const { return m_currentFormat; }
     void dumpStats() const;
 

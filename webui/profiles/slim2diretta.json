@@ -186,7 +186,7 @@
                     "type": "number",
                     "cli_arg": "--pcm-buffer-seconds",
                     "label": "PCM Buffer (seconds)",
-                    "description": "PCM ring buffer size in seconds. Empty = default (0.5s).",
+                    "description": "PCM ring buffer size in seconds. Empty = default (3s, 6s above 176 kHz).",
                     "default": "",
                     "step": 0.1
                 },
@@ -204,7 +204,7 @@
                     "type": "number",
                     "cli_arg": "--pcm-prefill-ms",
                     "label": "PCM Prefill (ms)",
-                    "description": "PCM prefill duration before playback starts. Empty = default (80ms).",
+                    "description": "PCM prefill duration before playback starts. Empty = default (500ms, FLAC/compressed 800ms; 1000/1500ms above 176 kHz).",
                     "default": "",
                     "min": 10
                 },
@@ -213,7 +213,7 @@
                     "type": "number",
                     "cli_arg": "--dsd-prefill-ms",
                     "label": "DSD Prefill (ms)",
-                    "description": "DSD prefill duration before playback starts. Empty = default (200ms).",
+                    "description": "DSD prefill duration before playback starts. Empty = default (150ms).",
                     "default": "",
                     "min": 10
                 }

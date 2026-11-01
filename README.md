@@ -1,4 +1,4 @@
-# slim2diretta v1.4.29
+# slim2diretta v1.4.30
 
 **Native LMS Player with Diretta Output - Mono-Process Architecture**
 
@@ -8,7 +8,7 @@
 
 ---
 
-![Version](https://img.shields.io/badge/version-1.4.29-blue.svg)
+![Version](https://img.shields.io/badge/version-1.4.30-blue.svg)
 ![DSD](https://img.shields.io/badge/DSD-Native-green.svg)
 ![SDK](https://img.shields.io/badge/SDK-DIRETTA::Sync-orange.svg)
 
@@ -560,10 +560,10 @@ CPU Affinity (optional, accepts single core or comma-separated list):
   --cpu-other <core[,core...]>   Pin main + slimproto threads to core(s)
 
 Buffer Configuration (0/empty = use defaults):
-  --pcm-buffer-seconds <s>       PCM buffer size in seconds (default 0.5)
+  --pcm-buffer-seconds <s>       PCM buffer size in seconds (default 3, 6 above 176 kHz)
   --dsd-buffer-seconds <s>       DSD buffer size in seconds (default 0.8)
-  --pcm-prefill-ms <ms>          PCM prefill in ms (default 80)
-  --dsd-prefill-ms <ms>          DSD prefill in ms (default 200)
+  --pcm-prefill-ms <ms>          PCM prefill in ms (default 500, FLAC/compressed 800; 1000/1500 above 176 kHz)
+  --dsd-prefill-ms <ms>          DSD prefill in ms (default 150)
 ```
 
 ### CPU Affinity (Thread Pinning)
@@ -587,10 +587,10 @@ All three options are also configurable via the Web UI (CPU Affinity section).
 
 Starting with v1.3.0, buffer sizes and prefill durations can be tuned to suit the host/network environment. Defaults are conservative and work well for most setups; tuning is only useful for specific scenarios (e.g., high sample rates with tight latency, or very slow storage).
 
-- `--pcm-buffer-seconds <s>`: PCM ring buffer size in seconds (default 0.5s). Larger values absorb more jitter at the cost of latency.
+- `--pcm-buffer-seconds <s>`: PCM ring buffer size in seconds (default 3s, 6s above 176 kHz). Larger values absorb more jitter at the cost of latency.
 - `--dsd-buffer-seconds <s>`: DSD ring buffer size in seconds (default 0.8s).
-- `--pcm-prefill-ms <ms>`: how much audio to preload before playback starts (default 80ms).
-- `--dsd-prefill-ms <ms>`: same for DSD (default 200ms).
+- `--pcm-prefill-ms <ms>`: how much audio to preload before playback starts (default 500ms, FLAC/compressed 800ms; 1000/1500ms above 176 kHz).
+- `--dsd-prefill-ms <ms>`: same for DSD (default 150ms).
 
 These options are also available in the Web UI under a "Buffer Configuration" section.
 
@@ -621,9 +621,9 @@ An audio sample travels through several stages between LMS and the Diretta targe
    │                            ▼  SIMD format conversion             │
    │  ┌──────────────────────────────────────────────────────────┐     │
    │  │ ④ DirettaRingBuffer (lock-free SPSC, the main buffer)    │     │
-   │  │    PCM : 0.5 s   (--pcm-buffer-seconds)                  │     │
+   │  │    PCM : 3 s     (--pcm-buffer-seconds)                  │     │
    │  │    DSD : 0.8 s   (--dsd-buffer-seconds)                  │     │
-   │  │    Prefill : 80-200 ms before playback starts            │     │
+   │  │    Prefill : 150-1500 ms before playback starts          │     │
    │  └─────────────────────────┬────────────────────────────────┘     │
    │                            ▼  getNewStream() SDK callback        │
    │  ┌──────────────────────────────────────────────────────────┐     │
@@ -654,8 +654,8 @@ An audio sample travels through several stages between LMS and the Diretta targe
 
 | Symptom | Action |
 |---------|--------|
-| Drops on Tidal / Qobuz via LMS | Raise `--pcm-buffer-seconds` (default 0.5 s → 1-2 s) and `--pcm-prefill-ms` |
-| Too long a delay before sound starts | Reduce `--pcm-prefill-ms` (default 80 ms) |
+| Drops on Tidal / Qobuz via LMS | Raise `--pcm-buffer-seconds` (default 3 s) and `--pcm-prefill-ms` |
+| Too long a delay before sound starts | Reduce `--pcm-prefill-ms` (default 500-800 ms) |
 | Underruns at DSD512+ | Raise `--dsd-buffer-seconds` (default 0.8 s) |
 | Generic socket buffer ceilings | Set once via your distribution's sysctl tuning, then forget |
 
@@ -1000,4 +1000,4 @@ This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) 
 
 **Enjoy native DSD and hi-res PCM streaming from your LMS library!**
 
-*Last updated: 2026-10-30 (v1.4.29)*
+*Last updated: 2026-11-01 (v1.4.30)*

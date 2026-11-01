@@ -91,6 +91,7 @@ private:
     bool m_finished = false;
     uint64_t m_decodedSamples = 0;
     unsigned m_metadataRetries = 0;  // Count of metadata incomplete retries
+    size_t m_metadataAttemptSize = 0;  // Input size at the last failed metadata attempt
 };
 
 #endif // SLIM2DIRETTA_FLAC_DECODER_H

@@ -13,7 +13,6 @@ set -e  # Exit on error
 # =============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-APP_VERSION="1.1.0"
 INSTALL_BIN="/usr/local/bin"
 SERVICE_FILE="/etc/systemd/system/slim2diretta.service"
 CONFIG_FILE="/etc/default/slim2diretta"
