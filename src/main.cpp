@@ -1050,7 +1050,7 @@ int main(int argc, char* argv[]) {
     // Idle release: release Diretta target after inactivity so other apps can use it
     constexpr int IDLE_RELEASE_TIMEOUT_S = 5;
     std::atomic<bool> direttaReleased{false};
-    std::chrono::steady_clock::time_point lastStopTime{};
+    std::atomic<std::chrono::steady_clock::time_point> lastStopTime{};
     std::atomic<bool> idleTimerActive{false};
 
     // Gapless: pending next track for audio thread chaining
@@ -1191,7 +1191,7 @@ int main(int argc, char* argv[]) {
                 char pcmEndian = cmd.pcmEndian;
                 audioTestRunning.store(true);
                 audioThreadDone.store(false, std::memory_order_release);
-                audioTestThread = std::thread([&httpStream, &slimproto, &audioTestRunning, &audioThreadDone, &hasPendingTrack, &pendingMutex, &pendingNextTrack, formatCode, pcmRate, pcmSize, pcmChannels, pcmEndian, direttaPtr, &config]() {
+                audioTestThread = std::thread([&httpStream, &slimproto, &audioTestRunning, &audioThreadDone, &hasPendingTrack, &pendingMutex, &pendingNextTrack, &lastStopTime, &idleTimerActive, formatCode, pcmRate, pcmSize, pcmChannels, pcmEndian, direttaPtr, &config]() {
 
                     // Pin the audio/decode thread (HTTP→decode→push). Prefer
                     // --cpu-decode when set; otherwise fall back to --cpu-other
@@ -1749,6 +1749,11 @@ int main(int argc, char* argv[]) {
                                 pendingNextTrack.reset();
                                 hasPendingTrack.store(false, std::memory_order_release);
                             }
+                            // LMS may not follow up on STMn: start the idle release
+                            // timer so the SDK doesn't hold the target on silence
+                            // until the user presses something.
+                            lastStopTime = std::chrono::steady_clock::now();
+                            idleTimerActive.store(true, std::memory_order_release);
                             audioThreadDone.store(true, std::memory_order_release);
                             return;
                         }
@@ -2446,7 +2451,7 @@ int main(int argc, char* argv[]) {
             // Auto-release Diretta target after idle timeout
             if (idleTimerActive.load(std::memory_order_acquire) &&
                 !direttaReleased.load(std::memory_order_acquire)) {
-                auto elapsed = std::chrono::steady_clock::now() - lastStopTime;
+                auto elapsed = std::chrono::steady_clock::now() - lastStopTime.load();
                 if (elapsed >= std::chrono::seconds(IDLE_RELEASE_TIMEOUT_S)) {
                     LOG_INFO("No activity for " << IDLE_RELEASE_TIMEOUT_S
                              << "s — releasing Diretta target for other sources");
