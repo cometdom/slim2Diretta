@@ -16,7 +16,7 @@ if(DEFINED ENV{LLVM} OR LLVM)
     set(USE_LLD    ON CACHE BOOL "Use lld linker with clang"     FORCE)
 endif()
 
-project(slim2diretta VERSION 1.4.30)
+project(slim2diretta VERSION 1.4.31)
 
 set(CMAKE_CXX_STANDARD 17)
 
@@ -574,6 +574,7 @@ set(SLIM2DIRETTA_SOURCES
     src/HttpStreamClient.cpp
     src/Decoder.cpp
     src/FlacDecoder.cpp
+    src/OggFlacDecoder.cpp
     src/PcmDecoder.cpp
     src/DsdProcessor.cpp
     src/DsdStreamReader.cpp

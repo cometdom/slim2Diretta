@@ -2,6 +2,12 @@
 
 All notable changes to slim2diretta are documented in this file.
 
+## v1.4.31 (unreleased)
+
+### Added
+
+- **Native Ogg FLAC support, chained radio streams included.** Lossless internet radio stations sending Ogg FLAC (e.g. Riverside Radio) stopped after the first song, or partway through one (reported by Auke): slim2diretta did not advertise `ogf`, so LMS transcoded the stream with its stock `flac --ogg | sox` rule, and `flac` stops at the end of the first logical Ogg stream, while these stations start a new one with every song. Squeezelite advertises `ogf` and gets the stream passed through untouched, which is why it was not affected (confirmed by Auke with `ps` on the LMS host). slim2diretta now advertises `ogf`; LMS sends it with the FLAC format code `f`, and the new `OggFlacDecoder` in front of the FLAC decoders (native and FFmpeg) recognises the Ogg capture pattern and unwraps the pages into a native FLAC stream, written from RFC 3533 and the Xiph FLAC-to-Ogg mapping. New links with the same format keep feeding the same decoder, so this works with any libFLAC version (libFLAC only decodes chained Ogg from 1.5). Total samples and MD5 are cleared from the emitted STREAMINFO so the decoder does not stop at the first song's length. A link with a different format ends the stream cleanly for now (logged). Plain FLAC is passed through unchanged. Verified offline, bit-exact, with libFLAC-encoded test streams (single link, 3 chained links, 16-bit/44.1 kHz, random chunk sizes); not yet verified on a live station.
+
 ## v1.4.30 (2026-11-01)
 
 ### Fixed

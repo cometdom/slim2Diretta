@@ -43,7 +43,7 @@ This tool uses the **Diretta Host SDK**, which is proprietary software by Yu Har
 A standalone player that:
 1. Implements the **Slimproto protocol** natively (clean-room, no GPL code)
 2. Connects directly to **LMS** or **Roon** (Squeezebox mode) as a player
-3. Decodes **FLAC**, **MP3**, **AAC**, **Ogg Vorbis**, **PCM/WAV/AIFF**, and **DSD** (DSF/DFF/DoP)
+3. Decodes **FLAC** (including Ogg FLAC), **MP3**, **AAC**, **Ogg Vorbis**, **PCM/WAV/AIFF**, and **DSD** (DSF/DFF/DoP)
 4. Streams audio to a **Diretta Target** using DirettaSync v2.0
 
 ### Why Use This Instead of squeeze2diretta?
@@ -864,7 +864,7 @@ On `EPERM` (e.g. CLI run as an unprivileged user without setcap), the binary emi
 
 ## Internet Radio Support
 
-slim2diretta supports internet radio via the optional MP3, AAC, and Ogg Vorbis codecs (libmpg123, fdk-aac, libvorbisfile). All three include automatic resync on corrupted frames and gap handling for robust streaming. Install them before running `cmake` so they're picked up — see [Build Options](#build-options) for how to toggle them individually.
+slim2diretta supports internet radio via the optional MP3, AAC, and Ogg Vorbis codecs (libmpg123, fdk-aac, libvorbisfile). All three include automatic resync on corrupted frames and gap handling for robust streaming. Ogg FLAC radio (lossless stations) is decoded natively, chained streams included: slim2diretta advertises `ogf`, so LMS passes these streams through instead of transcoding them with `flac | sox`, which stops after the first song. Install them before running `cmake` so they're picked up — see [Build Options](#build-options) for how to toggle them individually.
 
 ---
 

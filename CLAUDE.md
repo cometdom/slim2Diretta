@@ -113,6 +113,7 @@ All three options are exposed via CLI and Web UI (CPU Affinity group, `cli_opts`
 | `src/HttpStreamClient.cpp/h` | HTTP audio stream fetcher |
 | `src/Decoder.h` | Decoder abstract interface |
 | `src/FlacDecoder.cpp/h` | FLAC decoder (libFLAC) |
+| `src/OggFlacDecoder.cpp/h` | Ogg FLAC unwrapper in front of the FLAC decoders (v1.4.31) |
 | `src/PcmDecoder.cpp/h` | PCM/WAV/AIFF header parser |
 | `src/Mp3Decoder.cpp/h` | MP3 decoder (libmpg123, optional) |
 | `src/OggDecoder.cpp/h` | Ogg Vorbis decoder (libvorbisfile, optional) |
@@ -235,6 +236,7 @@ Both factors combine (`combineGainQ16()`, a 16.16×16.16 fixed-point multiply) i
 - **`format=p` (PCM/WAV/AIFF)**: Always uses native `PcmDecoder`, even when `--decoder ffmpeg` is active. PcmDecoder parses WAV/AIFF headers to detect the true sample rate, which is critical for high-rate files (e.g., 705600 Hz). The Slimproto `rate` field cannot encode rates above ~192kHz (sent as `rate=3` → 44100 Hz).
 - **`format=d` (DSD)**: Always uses native DSD path (raw bitstream, not decoded).
 - **`format=f` (FLAC), MP3, AAC, OGG**: Use FFmpeg when `--decoder ffmpeg` is active, native otherwise.
+- **Ogg FLAC (v1.4.31)**: we advertise `ogf`, and LMS sends Ogg FLAC as `format=f` with pcm sample size `o`. Every FLAC decoder (native or FFmpeg) is wrapped in `OggFlacDecoder`, which sniffs `OggS` and otherwise passes bytes through untouched. It unwraps Ogg pages (CRC-checked, resync on loss) into a native FLAC stream: one `fLaC` + STREAMINFO (total samples and MD5 cleared, so libFLAC doesn't stop at the first song's sample count), then only FLAC frame packets. Chained links (a new Ogg logical stream per radio song) with the same format just continue into the same decoder — independent of libFLAC's own chained-Ogg support, which only exists from 1.5. A format change between links ends the stream (`hasError()` once drained). Without `ogf`, LMS transcodes with `flac --ogg | sox`, which stops after the first link.
 
 ## FLAC Decoder Notes
 

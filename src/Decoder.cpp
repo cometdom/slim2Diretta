@@ -9,6 +9,7 @@
 
 #include "Decoder.h"
 #include "FlacDecoder.h"
+#include "OggFlacDecoder.h"
 #include "PcmDecoder.h"
 #include "SlimprotoMessages.h"
 #include "LogLevel.h"
@@ -34,6 +35,10 @@ std::unique_ptr<Decoder> Decoder::create(char formatCode,
     // DSD is raw bitstream — not decoded.
     if (backend == "ffmpeg" && formatCode != FORMAT_DSD && formatCode != FORMAT_PCM) {
         LOG_DEBUG("[Decoder] Using FFmpeg backend for format '" << formatCode << "'");
+        if (formatCode == FORMAT_FLAC) {
+            // LMS also sends Ogg FLAC as 'f' (we advertise "ogf")
+            return std::make_unique<OggFlacDecoder>(std::make_unique<FfmpegDecoder>(formatCode));
+        }
         return std::make_unique<FfmpegDecoder>(formatCode);
     }
 #else
@@ -44,7 +49,8 @@ std::unique_ptr<Decoder> Decoder::create(char formatCode,
 
     switch (formatCode) {
         case FORMAT_FLAC:
-            return std::make_unique<FlacDecoder>();
+            // LMS also sends Ogg FLAC as 'f' (we advertise "ogf")
+            return std::make_unique<OggFlacDecoder>(std::make_unique<FlacDecoder>());
         case FORMAT_PCM:
             return std::make_unique<PcmDecoder>();
 #ifdef ENABLE_MP3
