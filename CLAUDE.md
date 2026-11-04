@@ -244,7 +244,7 @@ Both factors combine (`combineGainQ16()`, a 16.16×16.16 fixed-point multiply) i
 
 ## FFmpeg Notes
 
-**Parser flush at EOF**: `av_parser_parse2()` buffers partial codec frames; must flush with `(NULL, 0)` before flushing the decoder to recover the last audio frame (critical for gapless transitions).
+**Parser flush at EOF**: `av_parser_parse2()` buffers codec frames; must flush with `(NULL, 0)` before flushing the decoder (critical for gapless transitions). The FLAC parser consumes all input given but returns at most one frame per call, so many frames can be queued in it: flush **repeatedly until it returns nothing** (v1.4.31 — a single flush call lost every queued frame but one). Never call it with a zero-length non-NULL buffer mid-stream to drain it: that crashed libavcodec 60 in testing. `isFinished()`/`readDecoded()` must also wait for `m_outputBuffer` to be drained after the decoder's EOF (v1.4.31).
 
 **Raw PCM pitfalls** (historical — FFmpeg no longer handles raw PCM since v1.2.1):
 - `block_align` is 0 without a demuxer: must be set explicitly

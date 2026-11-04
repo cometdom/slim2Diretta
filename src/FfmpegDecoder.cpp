@@ -241,7 +241,7 @@ void FfmpegDecoder::convertFrame() {
 }
 
 size_t FfmpegDecoder::readDecoded(int32_t* out, size_t maxFrames) {
-    if (m_error || m_finished) return 0;
+    if (m_error || isFinished()) return 0;
 
     // Lazy init on first call
     if (!m_initialized) {
@@ -328,10 +328,12 @@ size_t FfmpegDecoder::readDecoded(int32_t* out, size_t maxFrames) {
         size_t available = m_inputBuffer.size() - m_inputPos;
         if (available == 0) {
             if (m_eof) {
-                // Flush parser first — it may have buffered the last
-                // partial FLAC frame. Without this, the last few
-                // samples of the stream are lost → click at gapless
-                // track transitions.
+                // Flush parser first. The FLAC parser consumes all the
+                // input it is given but returns at most one frame per
+                // call, so it can hold many frames by now; each flush
+                // call returns one of them. Keep flushing until it
+                // returns nothing — a single call lost every frame but
+                // one (the end of the track, worse with fast delivery).
                 if (m_parser && !m_parserFlushed) {
                     uint8_t* outData = nullptr;
                     int outSize = 0;
@@ -339,8 +341,9 @@ size_t FfmpegDecoder::readDecoded(int32_t* out, size_t maxFrames) {
                                      &outData, &outSize,
                                      nullptr, 0,
                                      AV_NOPTS_VALUE, AV_NOPTS_VALUE, 0);
-                    m_parserFlushed = true;
-                    if (outSize > 0) {
+                    if (outSize <= 0) {
+                        m_parserFlushed = true;
+                    } else {
                         m_packet->data = outData;
                         m_packet->size = outSize;
                         avcodec_send_packet(m_codecCtx, m_packet);

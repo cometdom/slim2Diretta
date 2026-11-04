@@ -41,7 +41,11 @@ public:
     size_t readDecoded(int32_t* out, size_t maxFrames) override;
     bool isFormatReady() const override { return m_formatReady; }
     DecodedFormat getFormat() const override { return m_format; }
-    bool isFinished() const override { return m_finished; }
+    // Finished only once the decoded output has been read too: the decoder
+    // can report EOF while frames are still waiting in m_outputBuffer.
+    bool isFinished() const override {
+        return m_finished && m_outputPos >= m_outputBuffer.size();
+    }
     bool hasError() const override { return m_error; }
     uint64_t getDecodedSamples() const override { return m_decodedSamples; }
     void flush() override;
