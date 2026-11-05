@@ -205,6 +205,13 @@ std::atomic<uint32_t> g_trackReplayGain{GAIN_Q16_UNITY};  // strm-s, per track
 std::atomic<uint32_t> g_userGainLeft{GAIN_Q16_UNITY};     // audg, only when dvc set
 std::atomic<uint32_t> g_userGainRight{GAIN_Q16_UNITY};
 
+// Start threshold LMS asks for in strm-s (outputThreshold, tenths of a
+// second, converted to ms). LMS sets it for live streams (2 s for Ogg FLAC
+// radio): a real-time source never refills the buffer faster than it plays,
+// so the cushion built before starting is all there is. Used as a minimum
+// for both our prebuffer and the DirettaSync prefill.
+std::atomic<uint32_t> g_trackOutputThresholdMs{0};
+
 // Combine two 16.16 fixed-point gains (each 0x10000 = unity) into one.
 static uint32_t combineGainQ16(uint32_t a, uint32_t b) {
     return static_cast<uint32_t>((static_cast<uint64_t>(a) * b) >> 16);
@@ -1077,6 +1084,9 @@ int main(int argc, char* argv[]) {
         switch (cmd.command) {
             case STRM_START: {
                 LOG_INFO("Stream start requested (format=" << cmd.format << ")");
+                g_trackOutputThresholdMs.store(
+                    static_cast<uint32_t>(cmd.outputThreshold) * 100,
+                    std::memory_order_relaxed);
 
                 // ReplayGain (opt-in, config.enableReplayGain): capture the
                 // per-track gain LMS computed for this track. 0 = no
@@ -1590,6 +1600,9 @@ int main(int argc, char* argv[]) {
                     // volume (g_userGainLeft/Right) is intentionally NOT snapshotted:
                     // a live volume change should still apply immediately mid-track.
                     uint32_t trackGainSnapshot = g_trackReplayGain.load(std::memory_order_relaxed);
+                    // Same reasoning: the next track's strm-s may overwrite it
+                    uint32_t outputThresholdMs =
+                        g_trackOutputThresholdMs.load(std::memory_order_relaxed);
 
                     // Create decoder for this format
                     auto decoder = Decoder::create(curFormatCode, config.decoderBackend);
@@ -1919,9 +1932,15 @@ int main(int argc, char* argv[]) {
                                                      curFormatCode == FORMAT_MP3 ||
                                                      curFormatCode == FORMAT_OGG ||
                                                      curFormatCode == FORMAT_AAC);
-                            // Adapt prebuffer for high sample rates
-                            if (fmt.sampleRate > DirettaBuffer::HIGHRATE_THRESHOLD) {
-                                prebufferMs = PREBUFFER_MS_HIGHRATE;
+                            // Adapt prebuffer for high sample rates, and never
+                            // start below the threshold LMS asked for
+                            prebufferMs = (fmt.sampleRate > DirettaBuffer::HIGHRATE_THRESHOLD)
+                                ? PREBUFFER_MS_HIGHRATE : PREBUFFER_MS_NORMAL;
+                            audioFmt.minPrefillMs = outputThresholdMs;
+                            if (outputThresholdMs > prebufferMs) {
+                                prebufferMs = outputThresholdMs;
+                                LOG_INFO("[Audio] Start threshold from LMS: "
+                                         << outputThresholdMs << "ms");
                             }
                         }
 

@@ -257,6 +257,7 @@ void SlimprotoClient::handleStrm(const uint8_t* data, size_t len) {
                      << " rate=" << cmd.pcmSampleRate
                      << " size=" << cmd.pcmSampleSize
                      << " ch=" << cmd.pcmChannels
+                     << " threshold=" << static_cast<int>(cmd.outputThreshold)
                      << " port=" << cmd.getServerPort());
             LOG_DEBUG("[Slimproto] HTTP request: " << httpRequest.substr(0, 120));
             break;

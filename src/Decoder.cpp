@@ -33,7 +33,15 @@ std::unique_ptr<Decoder> Decoder::create(char formatCode,
     // FFmpeg backend handles compressed formats (FLAC, MP3, AAC, OGG).
     // PCM uses native decoder (parses WAV/AIFF headers for true sample rate).
     // DSD is raw bitstream — not decoded.
-    if (backend == "ffmpeg" && formatCode != FORMAT_DSD && formatCode != FORMAT_PCM) {
+    // Ogg Vorbis too when libvorbisfile is built in: FfmpegDecoder has no Ogg
+    // demuxer, so the Vorbis codec never gets its headers ("Extradata missing").
+#ifdef ENABLE_OGG
+    constexpr bool nativeOgg = true;
+#else
+    constexpr bool nativeOgg = false;
+#endif
+    if (backend == "ffmpeg" && formatCode != FORMAT_DSD && formatCode != FORMAT_PCM &&
+        !(nativeOgg && formatCode == FORMAT_OGG)) {
         LOG_DEBUG("[Decoder] Using FFmpeg backend for format '" << formatCode << "'");
         if (formatCode == FORMAT_FLAC) {
             // LMS also sends Ogg FLAC as 'f' (we advertise "ogf")

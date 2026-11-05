@@ -149,6 +149,8 @@ struct AudioFormat {
     bool isCompressed = false;
     bool isDoP = false;  // DSD-over-PCM: carried as 24-bit PCM, but silence
                          // must be valid DoP (markers + DSD idle), not 0x00
+    uint32_t minPrefillMs = 0;  // PCM: start no earlier than this (0 = defaults).
+                                // Not part of the format identity (operator==).
 
     enum class DSDFormat { DSF, DFF };
     DSDFormat dsdFormat = DSDFormat::DSF;
@@ -575,6 +577,7 @@ private:
     void configureRingDSD(uint32_t byteRate, int channels);
     size_t calculateAlignedPrefill(size_t bytesPerSecond, size_t bytesPerBuffer,
                                    bool isDSD, bool isCompressed);
+    void computePcmPrefill(bool isCompressed);
     void beginReconfigure();
     void endReconfigure();
 
@@ -746,6 +749,7 @@ private:
     // Prefill and stabilization
     size_t m_prefillTarget = 0;           // Prefill target in bytes
     size_t m_prefillTargetBuffers = 0;    // Prefill target in whole buffer count
+    uint32_t m_minPrefillMs = 0;          // PCM prefill floor for the open track (AudioFormat::minPrefillMs)
     std::atomic<bool> m_prefillComplete{false};
     std::atomic<bool> m_postOnlineDelayDone{false};
     std::atomic<int> m_silenceBuffersRemaining{0};
