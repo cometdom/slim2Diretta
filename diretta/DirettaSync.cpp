@@ -124,11 +124,26 @@ struct SdkHasDiswork<S, std::void_t<decltype(std::declval<S&>().open(
     std::declval<int>(), std::declval<typename S::MSMODE>(), std::declval<bool>()))>>
     : std::true_type {};
 
+// SDK 157 dropped the ifno parameter (we always passed 0) and appended two
+// optional custom-socket pointers, left at their nullptr defaults.
+template <typename S, typename = void>
+struct SdkOpenWithoutIfno : std::false_type {};
+template <typename S>
+struct SdkOpenWithoutIfno<S, std::void_t<decltype(std::declval<S&>().open(
+    std::declval<typename S::THRED_MODE>(), std::declval<ACQUA::Clock>(),
+    std::declval<const std::string&>(), std::declval<std::uint64_t>(),
+    std::declval<int>(), std::declval<int>(), std::declval<int>(),
+    std::declval<typename S::MSMODE>(), std::declval<bool>()))>>
+    : std::true_type {};
+
 template <typename S>
 static bool sdkOpen(S& sync, typename S::THRED_MODE mode, ACQUA::Clock info, uint16_t ifno,
                      const std::string& name, std::uint64_t id, int cpuMain, int cpuOther,
                      int rngOther, typename S::MSMODE msMode) {
-    if constexpr (SdkHasDiswork<S>::value) {
+    if constexpr (SdkOpenWithoutIfno<S>::value) {
+        (void)ifno;
+        return sync.open(mode, info, name, id, cpuMain, cpuOther, rngOther, msMode, false);
+    } else if constexpr (SdkHasDiswork<S>::value) {
         return sync.open(mode, info, ifno, name, id, cpuMain, cpuOther, rngOther, msMode, false);
     } else {
         return sync.open(mode, info, ifno, name, id, cpuMain, cpuOther, rngOther, msMode);
@@ -545,6 +560,7 @@ bool DirettaSync::open(const AudioFormat& format) {
     // that froze playback until a service restart).
     std::lock_guard<std::recursive_mutex> controlLock(m_controlMutex);
     m_fadeInRequest.store(FADE_CANCEL, std::memory_order_release);  // a track opened here starts bit-exact
+    m_minPrefillMs = format.isDSD ? 0 : format.minPrefillMs;
 
     std::cout << "[DirettaSync] ========== OPEN ==========" << std::endl;
     std::cout << "[DirettaSync] Format: " << format.sampleRate << "Hz/"
@@ -622,6 +638,7 @@ bool DirettaSync::open(const AudioFormat& format) {
                 bool wasPlaying = m_playing.load(std::memory_order_acquire);
                 beginReconfigure();
                 m_ringBuffer.clear();
+                computePcmPrefill(format.isCompressed);  // threshold may differ per track
                 m_prefillComplete = false;
                 m_rebuffering.store(false, std::memory_order_relaxed);
                 // m_postOnlineDelayDone stays true - DAC already stable
@@ -654,6 +671,9 @@ bool DirettaSync::open(const AudioFormat& format) {
                 // NOTE: Do NOT reset m_postOnlineDelayDone for quick resume!
                 // The DAC is already stable from the previous track.
                 m_ringBuffer.clear();
+                if (!format.isDSD) {
+                    computePcmPrefill(format.isCompressed);  // threshold may differ per track
+                }
                 m_prefillComplete = false;
                 m_rebuffering.store(false, std::memory_order_relaxed);
                 // m_postOnlineDelayDone stays true - DAC already stable
@@ -1434,10 +1454,56 @@ size_t DirettaSync::calculateAlignedPrefill(size_t bytesPerSecond, size_t bytesP
     size_t divisor = highRate ? 2 : 4;
     size_t maxBuffers = (ringSize > 0 && bytesPerBuffer > 0) ? ringSize / (divisor * bytesPerBuffer) : 100;
 
+    // Start threshold requested by LMS (live streams): a real-time source never
+    // refills faster than it plays, so this cushion is all there is. Allowed
+    // up to 3/4 of the ring instead of the usual cap.
+    if (!isDSD && m_minPrefillMs > 0 && ringSize > 0 && bytesPerBuffer > 0) {
+        size_t minBuffers = ((bytesPerSecond * m_minPrefillMs) / 1000 + bytesPerBuffer - 1)
+                            / bytesPerBuffer;
+        maxBuffers = std::max(maxBuffers, (ringSize * 3 / 4) / bytesPerBuffer);
+        targetBuffers = std::max(targetBuffers, minBuffers);
+    }
+
     targetBuffers = std::max(targetBuffers, size_t{8});
     targetBuffers = std::min(targetBuffers, maxBuffers);
 
     return targetBuffers;
+}
+
+// PCM prefill target from the ring geometry stored by configureRingPCM().
+// Also called by the same-format quick resume, which keeps the ring but may
+// carry a different start threshold (AudioFormat::minPrefillMs).
+void DirettaSync::computePcmPrefill(bool isCompressed) {
+    size_t bytesPerSecond = static_cast<size_t>(m_sampleRate.load(std::memory_order_acquire)) *
+                            m_channels.load(std::memory_order_acquire) *
+                            m_bytesPerSample.load(std::memory_order_acquire);
+    size_t bytesPerBuffer = static_cast<size_t>(m_bytesPerBuffer.load(std::memory_order_acquire));
+    int bytesPerFrame = m_bytesPerFrame.load(std::memory_order_acquire);
+    uint32_t framesRemainder = m_framesPerBufferRemainder.load(std::memory_order_acquire);
+    if (bytesPerBuffer == 0) return;
+
+    // Aligned prefill: calculate as whole-buffer count for clean transitions
+    m_prefillTargetBuffers = calculateAlignedPrefill(bytesPerSecond, bytesPerBuffer, false, isCompressed);
+
+    // For non-integer sample rates (44.1kHz family), calculate exact byte count
+    // accounting for the frames remainder accumulator pattern
+    if (framesRemainder == 0) {
+        m_prefillTarget = m_prefillTargetBuffers * bytesPerBuffer;
+    } else {
+        // Compute the sum of N callback sizes to stay on true boundaries
+        size_t totalBytes = 0;
+        uint32_t acc = 0;
+        for (size_t i = 0; i < m_prefillTargetBuffers; ++i) {
+            size_t bytesThis = bytesPerBuffer;
+            acc += static_cast<uint32_t>(framesRemainder);
+            if (acc >= 1000) {
+                acc -= 1000;
+                bytesThis += static_cast<size_t>(bytesPerFrame);
+            }
+            totalBytes += bytesThis;
+        }
+        m_prefillTarget = totalBytes;
+    }
 }
 
 void DirettaSync::configureRingPCM(int rate, int channels, int direttaBps, int inputBps, bool isCompressed, bool isDoP) {
@@ -1485,28 +1551,7 @@ void DirettaSync::configureRingPCM(int rate, int channels, int direttaBps, int i
     size_t bytesPerBuffer = static_cast<size_t>(framesBase) * bytesPerFrame;
     m_bytesPerBuffer.store(static_cast<int>(bytesPerBuffer), std::memory_order_release);
 
-    // Aligned prefill: calculate as whole-buffer count for clean transitions
-    m_prefillTargetBuffers = calculateAlignedPrefill(bytesPerSecond, bytesPerBuffer, false, isCompressed);
-
-    // For non-integer sample rates (44.1kHz family), calculate exact byte count
-    // accounting for the frames remainder accumulator pattern
-    if (framesRemainder == 0) {
-        m_prefillTarget = m_prefillTargetBuffers * bytesPerBuffer;
-    } else {
-        // Compute the sum of N callback sizes to stay on true boundaries
-        size_t totalBytes = 0;
-        uint32_t acc = 0;
-        for (size_t i = 0; i < m_prefillTargetBuffers; ++i) {
-            size_t bytesThis = bytesPerBuffer;
-            acc += static_cast<uint32_t>(framesRemainder);
-            if (acc >= 1000) {
-                acc -= 1000;
-                bytesThis += static_cast<size_t>(bytesPerFrame);
-            }
-            totalBytes += bytesThis;
-        }
-        m_prefillTarget = totalBytes;
-    }
+    computePcmPrefill(isCompressed);
     m_prefillComplete = false;
 
     DIRETTA_LOG("Ring PCM: " << rate << "Hz " << channels << "ch "

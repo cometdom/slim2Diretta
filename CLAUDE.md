@@ -113,6 +113,7 @@ All three options are exposed via CLI and Web UI (CPU Affinity group, `cli_opts`
 | `src/HttpStreamClient.cpp/h` | HTTP audio stream fetcher |
 | `src/Decoder.h` | Decoder abstract interface |
 | `src/FlacDecoder.cpp/h` | FLAC decoder (libFLAC) |
+| `src/OggFlacDecoder.cpp/h` | Ogg FLAC unwrapper in front of the FLAC decoders (v1.4.31) |
 | `src/PcmDecoder.cpp/h` | PCM/WAV/AIFF header parser |
 | `src/Mp3Decoder.cpp/h` | MP3 decoder (libmpg123, optional) |
 | `src/OggDecoder.cpp/h` | Ogg Vorbis decoder (libvorbisfile, optional) |
@@ -170,13 +171,15 @@ Key messages: HELO (registration), STAT (status), strm (stream control), audg (v
 
 ## Dependencies
 
-- **Diretta Host SDK v147 through v155** (proprietary, not committed, personal use). Current at time of writing: v155. v147→v150 are source/API-compatible at the compile level with no code changes needed (the only breaking API change between v149 and v150 was in `SyncBuffer`, a class this codebase never uses since it inherits `DIRETTA::Sync` directly), **but SDK 150 exposed a real runtime bug**: a ~50s connection stall, fixed in v1.4.21 — see "SDK 150.x connection stall fix" above. Auto-detected at CMake configure time via `Host/Release.hpp` parsing — newer releases that preserve the same header layout will be picked up automatically. v149+ ships each arch variant built with both GCC15 and GCC16 (`-DARCH_NAME=`); CMake warns if the system gcc is older than the selected variant's GCC major version (only for GCC16+, since GCC15-vs-older-system has years of proven field use — see build commands above and issue #10).
+- **Diretta Host SDK v147 through v157** (proprietary, not committed, personal use). Current at time of writing: v157. v147→v150 are source/API-compatible at the compile level with no code changes needed (the only breaking API change between v149 and v150 was in `SyncBuffer`, a class this codebase never uses since it inherits `DIRETTA::Sync` directly), **but SDK 150 exposed a real runtime bug**: a ~50s connection stall, fixed in v1.4.21 — see "SDK 150.x connection stall fix" above. Auto-detected at CMake configure time via `Host/Release.hpp` parsing — newer releases that preserve the same header layout will be picked up automatically. v149+ ships each arch variant built with both GCC15 and GCC16 (`-DARCH_NAME=`); CMake warns if the system gcc is older than the selected variant's GCC major version (only for GCC16+, since GCC15-vs-older-system has years of proven field use — see build commands above and issue #10).
 
   **SDK 155 broke source compatibility in four places** (v1.4.27, ported from DirettaRendererUPnP v2.5.23 — same root cause/fix, both projects inherit `DIRETTA::Sync` directly). Resolved at compile time via SFINAE/`if constexpr` (same pattern as DRUP's `sdkConnect()`/`sdkMsMode()`, newly introduced here for this), so `diretta/DirettaSync.cpp` builds unmodified against SDK 147 through 155 — no `#ifdef`, no version pinning:
   1. **`Sync::open()` gained a trailing `bool diswork`**, no default — new `sdkOpen()`/`SdkHasDiswork<S>`. Both call sites (`openSyncConnection()` and `reopenForFormatChange()`) now go through `sdkOpen(static_cast<DIRETTA::Sync&>(*this), ...)`, `false` for `diswork` on SDK 155 (what DRUP passes too). The explicit cast matters: `DirettaSync::open(const AudioFormat&)` hides `DIRETTA::Sync::open()` by name, so without it the SFINAE probe and the call inside `sdkOpen()` would both resolve against the wrong overload.
   2. **`Sync::Info::supportMSmode`** (bitmask field on SDK ≤150) **became three boolean methods** (`checkSinkSupportMSmode1()`/`2()`/`3()`) on SDK 155 — new `sdkMSmodeBitmask()`/`SdkHasMSmodeField<I>` reconstruct the bitmask either way; the three logging sites (`DirettaSync.cpp`) didn't need further changes.
   3. **`Find::Setting::Name` removed outright, no replacement** — found only by compiling against a real SDK 155 tree, not anticipated from the sibling projects. Purely cosmetic (3 of this file's 4 `Find::Setting` sites never set it anyway); new `setFindSettingNameIfPresent()`/`SdkHasFindSettingName<T>` set it only where the field exists.
   4. `SyncBuffer::setupBuffer()`/`connect()`'s callback-mode bool move — **not applicable here**, this codebase never uses `SyncBuffer`.
+
+  **SDK 157 (v1.4.31)**: `Sync::open()` lost its `uint16_t ifno` parameter (we always passed 0) and gained two trailing optional `ACQUA::EthernetSocket*` (custom sockets, default `nullptr`). Handled by a third `sdkOpen()` branch, `SdkOpenWithoutIfno<S>`, probed first. Other 157 header changes don't affect us: `Find(const Setting&, EthernetSocket*, uint16_t=0)` (we only use `Find(const Setting&)`), and the new `Find::Setting::RequestMS` is initialised by `Setting()`. `DirettaHostSDK_157` is searched first. Builds verified against 157/155/150/149. **SDK licensing**: Yu Harada permits AI code assistance based on the SDK headers only; never load or inspect the SDK binaries (`lib/*.a`, `*.lib`) with an AI tool.
 
   `CMakeLists.txt`'s SDK search list also gained `DirettaHostSDK_155` candidates ahead of 150/149/148/147 (same 6-path pattern per version), so a fresh SDK-155-only install auto-detects without needing `DIRETTA_SDK_PATH`. Verified: clean build against SDK 149, 150 and 155 (both explicit `DIRETTA_SDK_PATH` and bare auto-detect).
 - **libFLAC** (BSD-3-Clause) for FLAC decoding
@@ -187,9 +190,9 @@ Key messages: HELO (registration), STAT (status), strm (stream control), audg (v
 
 SDK locations searched (in order, newest version preferred — each version's full path list is tried before falling back to the next, so builders who haven't updated their SDK yet keep working against whatever they actually have installed, no action needed):
 1. `$DIRETTA_SDK_PATH`
-2. `~/DirettaHostSDK_155`, `~/DirettaHostSDK_150`, `~/DirettaHostSDK_149`, `~/DirettaHostSDK_148`, `~/DirettaHostSDK_147`
-3. `./DirettaHostSDK_155`, `./DirettaHostSDK_150`, `./DirettaHostSDK_149`, `./DirettaHostSDK_148`, `./DirettaHostSDK_147`
-4. `/opt/DirettaHostSDK_155`, `/opt/DirettaHostSDK_150`, `/opt/DirettaHostSDK_149`, `/opt/DirettaHostSDK_148`, `/opt/DirettaHostSDK_147`
+2. `~/DirettaHostSDK_157`, `~/DirettaHostSDK_155`, `~/DirettaHostSDK_150`, `~/DirettaHostSDK_149`, `~/DirettaHostSDK_148`, `~/DirettaHostSDK_147`
+3. `./DirettaHostSDK_157`, `./DirettaHostSDK_155`, `./DirettaHostSDK_150`, `./DirettaHostSDK_149`, `./DirettaHostSDK_148`, `./DirettaHostSDK_147`
+4. `/opt/DirettaHostSDK_157`, `/opt/DirettaHostSDK_155`, `/opt/DirettaHostSDK_150`, `/opt/DirettaHostSDK_149`, `/opt/DirettaHostSDK_148`, `/opt/DirettaHostSDK_147`
 
 
 ## Audio Push Strategy
@@ -202,7 +205,7 @@ The audio thread (in `main.cpp`) handles HTTP reading, decoding, and ring buffer
 - **sendAudio return value**: All push sites use the return value (input bytes consumed) to advance `decodeCachePos` — prevents data loss when ring buffer is near-full. The ring's PCM push helpers only ever write **whole frames** (v1.4.29, ported from DRUP v2.5.16 — `sendAudio()` passes the channel count / frame size): callers advance by whole frames, so a partial frame accepted by a nearly full ring would be re-sent and shift every following frame by one channel (L/R swap). Normal rates (≤176kHz) use single 1024-frame push per iteration; multi-chunk only for high rates
 - **Flow control**: 1ms sleep when buffer >95% full, loop back to HTTP read to keep TCP pipeline flowing
 - **Decode cache**: Up to 9.2M samples with compaction every 500k consumed samples
-- **Prebuffer**: 500ms normal, 3000ms for ≥176.4kHz
+- **Prebuffer**: 500ms normal, 3000ms for ≥176.4kHz, recomputed per track. **LMS start threshold (v1.4.31)**: `strm-s`'s `outputThreshold` (tenths of a second, 2 s for Ogg FLAC radio) is captured into `g_trackOutputThresholdMs`, snapshotted per track like the ReplayGain, and used as a floor for the prebuffer and, via `AudioFormat::minPrefillMs` → `DirettaSync::m_minPrefillMs`, for the prefill (cap raised to 3/4 of the ring for it). The same-format quick resume recomputes the prefill through `computePcmPrefill()` since it skips `configureRingPCM()`. Never lowers defaults or `--pcm-prefill-ms`; ignored for DSD
 - **Ring buffer sizing**: 3.0s normal (PCM_BUFFER_SECONDS, raised from 0.5s in v1.2.5 for CDN resilience), 6.0s for ≥176.4kHz (PCM_HIGHRATE_BUFFER_SECONDS). HIGHRATE_THRESHOLD = 176000
 - **SDK prefill**: 500ms PCM (raised from 50ms in v1.2.5), 800ms compressed / 500ms uncompressed (raised from 200/100ms)
 - **Adaptive rebuffering**: 50% refill threshold after underrun (raised from 20% in v1.2.5) — more resilient recovery when Qobuz/Tidal CDN delivery stalls. High-rate streams use the same 50% threshold for ~4.2s headroom
@@ -234,7 +237,9 @@ Both factors combine (`combineGainQ16()`, a 16.16×16.16 fixed-point multiply) i
 `Decoder::create()` in `Decoder.cpp` routes format codes to decoder implementations:
 - **`format=p` (PCM/WAV/AIFF)**: Always uses native `PcmDecoder`, even when `--decoder ffmpeg` is active. PcmDecoder parses WAV/AIFF headers to detect the true sample rate, which is critical for high-rate files (e.g., 705600 Hz). The Slimproto `rate` field cannot encode rates above ~192kHz (sent as `rate=3` → 44100 Hz).
 - **`format=d` (DSD)**: Always uses native DSD path (raw bitstream, not decoded).
+- **`format=o` (Ogg Vorbis)**: Always uses native `OggDecoder` when built in (`ENABLE_OGG`), even with `--decoder ffmpeg` (v1.4.31). `FfmpegDecoder` has no Ogg demuxer, so the Vorbis codec never receives its header packets ("Extradata missing").
 - **`format=f` (FLAC), MP3, AAC, OGG**: Use FFmpeg when `--decoder ffmpeg` is active, native otherwise.
+- **Ogg FLAC (v1.4.31)**: we advertise `ogf`, and LMS sends Ogg FLAC as `format=f` with pcm sample size `o`. Every FLAC decoder (native or FFmpeg) is wrapped in `OggFlacDecoder`, which sniffs `OggS` and otherwise passes bytes through untouched. It unwraps Ogg pages (CRC-checked, resync on loss) into a native FLAC stream: one `fLaC` + STREAMINFO (total samples and MD5 cleared, so libFLAC doesn't stop at the first song's sample count), then only FLAC frame packets. Chained links (a new Ogg logical stream per radio song) with the same format just continue into the same decoder — independent of libFLAC's own chained-Ogg support, which only exists from 1.5. A format change between links ends the stream (`hasError()` once drained). Without `ogf`, LMS transcodes with `flac --ogg | sox`, which stops after the first link.
 
 ## FLAC Decoder Notes
 
@@ -242,7 +247,7 @@ Both factors combine (`combineGainQ16()`, a 16.16×16.16 fixed-point multiply) i
 
 ## FFmpeg Notes
 
-**Parser flush at EOF**: `av_parser_parse2()` buffers partial codec frames; must flush with `(NULL, 0)` before flushing the decoder to recover the last audio frame (critical for gapless transitions).
+**Parser flush at EOF**: `av_parser_parse2()` buffers codec frames; must flush with `(NULL, 0)` before flushing the decoder (critical for gapless transitions). The FLAC parser consumes all input given but returns at most one frame per call, so many frames can be queued in it: flush **repeatedly until it returns nothing** (v1.4.31 — a single flush call lost every queued frame but one). Never call it with a zero-length non-NULL buffer mid-stream to drain it: that crashed libavcodec 60 in testing. `isFinished()`/`readDecoded()` must also wait for `m_outputBuffer` to be drained after the decoder's EOF (v1.4.31).
 
 **Raw PCM pitfalls** (historical — FFmpeg no longer handles raw PCM since v1.2.1):
 - `block_align` is 0 without a demuxer: must be set explicitly

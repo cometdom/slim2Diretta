@@ -9,6 +9,7 @@
 
 #include "Decoder.h"
 #include "FlacDecoder.h"
+#include "OggFlacDecoder.h"
 #include "PcmDecoder.h"
 #include "SlimprotoMessages.h"
 #include "LogLevel.h"
@@ -32,8 +33,20 @@ std::unique_ptr<Decoder> Decoder::create(char formatCode,
     // FFmpeg backend handles compressed formats (FLAC, MP3, AAC, OGG).
     // PCM uses native decoder (parses WAV/AIFF headers for true sample rate).
     // DSD is raw bitstream — not decoded.
-    if (backend == "ffmpeg" && formatCode != FORMAT_DSD && formatCode != FORMAT_PCM) {
+    // Ogg Vorbis too when libvorbisfile is built in: FfmpegDecoder has no Ogg
+    // demuxer, so the Vorbis codec never gets its headers ("Extradata missing").
+#ifdef ENABLE_OGG
+    constexpr bool nativeOgg = true;
+#else
+    constexpr bool nativeOgg = false;
+#endif
+    if (backend == "ffmpeg" && formatCode != FORMAT_DSD && formatCode != FORMAT_PCM &&
+        !(nativeOgg && formatCode == FORMAT_OGG)) {
         LOG_DEBUG("[Decoder] Using FFmpeg backend for format '" << formatCode << "'");
+        if (formatCode == FORMAT_FLAC) {
+            // LMS also sends Ogg FLAC as 'f' (we advertise "ogf")
+            return std::make_unique<OggFlacDecoder>(std::make_unique<FfmpegDecoder>(formatCode));
+        }
         return std::make_unique<FfmpegDecoder>(formatCode);
     }
 #else
@@ -44,7 +57,8 @@ std::unique_ptr<Decoder> Decoder::create(char formatCode,
 
     switch (formatCode) {
         case FORMAT_FLAC:
-            return std::make_unique<FlacDecoder>();
+            // LMS also sends Ogg FLAC as 'f' (we advertise "ogf")
+            return std::make_unique<OggFlacDecoder>(std::make_unique<FlacDecoder>());
         case FORMAT_PCM:
             return std::make_unique<PcmDecoder>();
 #ifdef ENABLE_MP3

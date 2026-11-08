@@ -1,4 +1,4 @@
-# slim2diretta v1.4.30
+# slim2diretta v1.4.31
 
 **Native LMS Player with Diretta Output - Mono-Process Architecture**
 
@@ -8,7 +8,7 @@
 
 ---
 
-![Version](https://img.shields.io/badge/version-1.4.30-blue.svg)
+![Version](https://img.shields.io/badge/version-1.4.31-blue.svg)
 ![DSD](https://img.shields.io/badge/DSD-Native-green.svg)
 ![SDK](https://img.shields.io/badge/SDK-DIRETTA::Sync-orange.svg)
 
@@ -43,7 +43,7 @@ This tool uses the **Diretta Host SDK**, which is proprietary software by Yu Har
 A standalone player that:
 1. Implements the **Slimproto protocol** natively (clean-room, no GPL code)
 2. Connects directly to **LMS** or **Roon** (Squeezebox mode) as a player
-3. Decodes **FLAC**, **MP3**, **AAC**, **Ogg Vorbis**, **PCM/WAV/AIFF**, and **DSD** (DSF/DFF/DoP)
+3. Decodes **FLAC** (including Ogg FLAC), **MP3**, **AAC**, **Ogg Vorbis**, **PCM/WAV/AIFF**, and **DSD** (DSF/DFF/DoP)
 4. Streams audio to a **Diretta Target** using DirettaSync v2.0
 
 ### Why Use This Instead of squeeze2diretta?
@@ -192,7 +192,7 @@ Both produce lossless output; the sonic difference is subtle and comes from inte
 
 ### Software Requirements
 - **OS**: Linux with kernel 4.x+
-- **Diretta Host SDK**: Version 150 (or 149/148/147, auto-detected) ([download here](https://www.diretta.link/hostsdk.html))
+- **Diretta Host SDK**: Version 157 (or 155/150/149/148/147, auto-detected) ([download here](https://www.diretta.link/hostsdk.html))
 - **LMS**: Lyrion Music Server 7.x+ running on your network (or Roon with Squeezebox mode)
 - **Build tools**: gcc/g++ 7.0+, make, CMake 3.10+
 - **Required library**: libFLAC
@@ -234,7 +234,7 @@ If a new release introduces a new optional dependency (e.g. a new codec or the F
 ```bash
 # 1. Download Diretta Host SDK first
 #    Visit: https://www.diretta.link/hostsdk.html
-#    Extract to: ~/DirettaHostSDK_150  (or latest version — auto-detected)
+#    Extract to: ~/DirettaHostSDK_157  (or latest version — auto-detected)
 
 # 2. Clone repository
 git clone https://github.com/cometdom/slim2diretta.git
@@ -330,10 +330,10 @@ sudo pacman -S ffmpeg
 #### 2. Download Diretta Host SDK
 
 1. Visit [diretta.link](https://www.diretta.link/hostsdk.html)
-2. Download **DirettaHostSDK_150** (or latest version — slim2diretta auto-detects 150, 149, 148, and 147)
+2. Download **DirettaHostSDK_157** (or latest version — slim2diretta auto-detects 157, 155, 150, 149, 148, and 147)
 3. Extract to one of these locations:
-   - `~/DirettaHostSDK_150`
-   - `/opt/DirettaHostSDK_150`
+   - `~/DirettaHostSDK_157`
+   - `/opt/DirettaHostSDK_157`
    - Or set `DIRETTA_SDK_PATH` environment variable
 
 #### 3. Clone and Build
@@ -864,7 +864,7 @@ On `EPERM` (e.g. CLI run as an unprivileged user without setcap), the binary emi
 
 ## Internet Radio Support
 
-slim2diretta supports internet radio via the optional MP3, AAC, and Ogg Vorbis codecs (libmpg123, fdk-aac, libvorbisfile). All three include automatic resync on corrupted frames and gap handling for robust streaming. Install them before running `cmake` so they're picked up — see [Build Options](#build-options) for how to toggle them individually.
+slim2diretta supports internet radio via the optional MP3, AAC, and Ogg Vorbis codecs (libmpg123, fdk-aac, libvorbisfile). All three include automatic resync on corrupted frames and gap handling for robust streaming. Ogg FLAC radio (lossless stations) is decoded natively, chained streams included: slim2diretta advertises `ogf`, so LMS passes these streams through instead of transcoding them with `flac | sox`, which stops after the first song. Install them before running `cmake` so they're picked up — see [Build Options](#build-options) for how to toggle them individually.
 
 ---
 
@@ -1000,4 +1000,4 @@ This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) 
 
 **Enjoy native DSD and hi-res PCM streaming from your LMS library!**
 
-*Last updated: 2026-11-01 (v1.4.30)*
+*Last updated: 2026-11-08 (v1.4.31)*

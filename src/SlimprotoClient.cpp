@@ -257,6 +257,7 @@ void SlimprotoClient::handleStrm(const uint8_t* data, size_t len) {
                      << " rate=" << cmd.pcmSampleRate
                      << " size=" << cmd.pcmSampleSize
                      << " ch=" << cmd.pcmChannels
+                     << " threshold=" << static_cast<int>(cmd.outputThreshold)
                      << " port=" << cmd.getServerPort());
             LOG_DEBUG("[Slimproto] HTTP request: " << httpRequest.substr(0, 120));
             break;
@@ -588,7 +589,10 @@ std::string SlimprotoClient::buildCapabilities() const {
     std::ostringstream caps;
 
     // Codecs — LMS splits on commas and matches ^[a-z][a-z0-9]{1,4}$
-    caps << "flc,pcm,aif,wav";
+    // "ogf" (Ogg FLAC) lets LMS pass internet radio through untouched instead
+    // of transcoding it with flac|sox, which stops after the first song of a
+    // chained stream. LMS sends it as 'f'; OggFlacDecoder unwraps it.
+    caps << "flc,ogf,pcm,aif,wav";
 #ifdef ENABLE_MP3
     caps << ",mp3";
 #endif
