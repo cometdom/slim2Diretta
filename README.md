@@ -192,7 +192,7 @@ Both produce lossless output; the sonic difference is subtle and comes from inte
 
 ### Software Requirements
 - **OS**: Linux with kernel 4.x+
-- **Diretta Host SDK**: Version 150 (or 149/148/147, auto-detected) ([download here](https://www.diretta.link/hostsdk.html))
+- **Diretta Host SDK**: Version 157 (or 155/150/149/148/147, auto-detected) ([download here](https://www.diretta.link/hostsdk.html))
 - **LMS**: Lyrion Music Server 7.x+ running on your network (or Roon with Squeezebox mode)
 - **Build tools**: gcc/g++ 7.0+, make, CMake 3.10+
 - **Required library**: libFLAC
@@ -234,7 +234,7 @@ If a new release introduces a new optional dependency (e.g. a new codec or the F
 ```bash
 # 1. Download Diretta Host SDK first
 #    Visit: https://www.diretta.link/hostsdk.html
-#    Extract to: ~/DirettaHostSDK_150  (or latest version — auto-detected)
+#    Extract to: ~/DirettaHostSDK_157  (or latest version — auto-detected)
 
 # 2. Clone repository
 git clone https://github.com/cometdom/slim2diretta.git
@@ -330,10 +330,10 @@ sudo pacman -S ffmpeg
 #### 2. Download Diretta Host SDK
 
 1. Visit [diretta.link](https://www.diretta.link/hostsdk.html)
-2. Download **DirettaHostSDK_150** (or latest version — slim2diretta auto-detects 150, 149, 148, and 147)
+2. Download **DirettaHostSDK_157** (or latest version — slim2diretta auto-detects 157, 155, 150, 149, 148, and 147)
 3. Extract to one of these locations:
-   - `~/DirettaHostSDK_150`
-   - `/opt/DirettaHostSDK_150`
+   - `~/DirettaHostSDK_157`
+   - `/opt/DirettaHostSDK_157`
    - Or set `DIRETTA_SDK_PATH` environment variable
 
 #### 3. Clone and Build

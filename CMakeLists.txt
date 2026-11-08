@@ -167,11 +167,17 @@ if(DEFINED ENV{DIRETTA_SDK_PATH})
     set(SDK_PATH $ENV{DIRETTA_SDK_PATH})
     message(STATUS "Using SDK from environment: ${SDK_PATH}")
 else()
-    # Search in common locations (newest first: 155, 150, 149, 148, 147). Each
+    # Search in common locations (newest first: 157, 155, 150, 149, 148, 147). Each
     # version is tried in full before falling back to the next, so anyone
     # who hasn't updated their SDK yet keeps building against whichever
     # version they actually have installed - no action needed on their part.
     set(SDK_SEARCH_PATHS
+        "$ENV{HOME}/DirettaHostSDK_157"
+        "${CMAKE_SOURCE_DIR}/DirettaHostSDK_157"
+        "${CMAKE_SOURCE_DIR}/../DirettaHostSDK_157"
+        "/opt/DirettaHostSDK_157"
+        "$ENV{HOME}/audio/DirettaHostSDK_157"
+        "/usr/local/DirettaHostSDK_157"
         "$ENV{HOME}/DirettaHostSDK_155"
         "${CMAKE_SOURCE_DIR}/DirettaHostSDK_155"
         "${CMAKE_SOURCE_DIR}/../DirettaHostSDK_155"
