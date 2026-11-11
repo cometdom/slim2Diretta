@@ -2,6 +2,16 @@
 
 All notable changes to slim2diretta are documented in this file.
 
+## v1.4.32 (2026-11-11)
+
+### Added
+
+- **`varpriotime` transfer mode**, ported from DirettaRendererUPnP v2.5.26 (PR #100, Koala887/Daniel). A variable-cycle transfer mode specified by priority cycle frequency in Hz instead of target cycle time in µs: exposes `Sync::configTransferVarPrioTime(std::uint32_t)` / `ProfileMaker::configTransferVarPrioTime(std::uint32_t)`. New `--prio-time <Hz>` CLI flag (default 300 Hz), wired through both the direct-`Sync` and `TargetProfile` code paths in `applyTransferMode()` and both WebUI profiles — same plumbing as every other `--transfer-mode` option.
+
+### Changed
+
+- **Minimum supported Diretta Host SDK raised to 155.** `configTransferVarPrioTime()` only exists from SDK 155 onward (absent from 147-150), and matching the DRUP PR as merged, the two call sites aren't behind the SFINAE/`if constexpr` compatibility guard this project normally uses for version-conditional SDK calls — so a build against SDK 147-150 now fails outright, not just the new mode. Left unguarded for the same reason as DRUP: self-installers already track current SDK releases closely, and AudioLinux/GentooPlayer's own package maintainers do too. Anyone still building against SDK 150 or earlier needs to download SDK 155+ first.
+
 ## v1.4.31 (2026-11-08)
 
 ### Added

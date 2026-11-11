@@ -2464,6 +2464,10 @@ void DirettaSync::applyTransferMode(DirettaTransferMode mode, ACQUA::Clock cycle
                 DIRETTA_LOG("Using TargetProfile VarMax (limit=" << m_config.targetProfileLimitTime << "us)");
                 pm.configTransferSizeMax();
                 break;
+            case DirettaTransferMode::VAR_PRIO_TIME:
+                DIRETTA_LOG("Using TargetProfile VarPrioTime (limit=" << m_config.targetProfileLimitTime << "Hz)");
+                pm.configTransferVarPrioTime(m_config.varPrioTime);
+                break;
             case DirettaTransferMode::VAR_AUTO:
             default:
                 DIRETTA_LOG("Using TargetProfile VarAuto (limit=" << m_config.targetProfileLimitTime << "us)");
@@ -2492,6 +2496,10 @@ void DirettaSync::applyTransferMode(DirettaTransferMode mode, ACQUA::Clock cycle
             configTransferRandom(minCycle, cycleTime, 1);
             break;
         }
+        case DirettaTransferMode::VAR_PRIO_TIME:
+            DIRETTA_LOG("Using VarPrioTime");
+            configTransferVarPrioTime(m_config.varPrioTime);
+            break;
         case DirettaTransferMode::VAR_MAX:
         default:
             DIRETTA_LOG("Using VarMax");

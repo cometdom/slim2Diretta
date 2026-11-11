@@ -1,4 +1,4 @@
-# slim2diretta v1.4.31
+# slim2diretta v1.4.32
 
 **Native LMS Player with Diretta Output - Mono-Process Architecture**
 
@@ -8,7 +8,7 @@
 
 ---
 
-![Version](https://img.shields.io/badge/version-1.4.31-blue.svg)
+![Version](https://img.shields.io/badge/version-1.4.32-blue.svg)
 ![DSD](https://img.shields.io/badge/DSD-Native-green.svg)
 ![SDK](https://img.shields.io/badge/SDK-DIRETTA::Sync-orange.svg)
 
@@ -698,13 +698,15 @@ Controls how audio packets are scheduled for transmission.
 | `auto` | SDK chooses automatically (default) |
 | `varauto` | Flex cycle mode — adaptive packet timing |
 | `varmax` | Flex cycle mode — packets filled to maximum |
+| `varpriotime` | Flex cycle mode — priority on cycle frequency in Hz (`--prio-time`). **Requires Diretta Host SDK 155 or later** — building against SDK 147-150 fails entirely once this mode is compiled in. |
 | `fixauto` | Fixed cycle mode — constant packet timing |
 | `random` | Random cycle mode — use with `--cycle-min-time` |
 
-#### Cycle Time (`--cycle-time` / `--cycle-min-time`)
+#### Cycle Time (`--cycle-time` / `--cycle-min-time` / `--prio-time`)
 
 - **`--cycle-time <us>`**: Transfer packet cycle maximum time in microseconds (default: 10000). This is the maximum interval between packet transmissions.
 - **`--cycle-min-time <us>`**: Transfer packet cycle minimum time in microseconds. Only used with `random` transfer mode, defines the lower bound of the random interval.
+- **`--prio-time <Hz>`**: Cycle time expressed as a frequency in Hz (default: 300). Only used with `varpriotime` transfer mode.
 
 #### Info Cycle (`--info-cycle`)
 

@@ -309,7 +309,7 @@ private:
 // Transfer Mode
 //=============================================================================
 
-enum class DirettaTransferMode { FIX_AUTO, VAR_AUTO, VAR_MAX, RANDOM, AUTO };
+enum class DirettaTransferMode { FIX_AUTO, VAR_AUTO, VAR_MAX, RANDOM, AUTO, VAR_PRIO_TIME };
 
 //=============================================================================
 // Configuration
@@ -323,6 +323,7 @@ struct DirettaConfig {
     unsigned int mtu = 0;  // 0 = auto-detect
     unsigned int mtuFallback = 1500;
     unsigned int infoCycle = 100000;          // Info packet cycle µs (SDK default: 100ms)
+    uint32_t varPrioTime = 300;                // VarPrioTime cycle time in Hz (default: 300)
     unsigned int cycleMinTime = 0;            // Min cycle for RANDOM mode (0 = unused, defaults to 333µs)
     unsigned int targetProfileLimitTime = 0;   // 0=SelfProfile (stable), >0=TargetProfile(limit cycle time µs)
     unsigned int dacStabilizationMs = DirettaBuffer::DAC_STABILIZATION_MS;

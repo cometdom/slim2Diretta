@@ -193,6 +193,7 @@
                         {"value": "", "label": "Auto (default)"},
                         {"value": "varmax", "label": "VarMax (packets filled to maximum)"},
                         {"value": "varauto", "label": "VarAuto (adaptive packet timing)"},
+                        {"value": "varpriotime", "label": "VarPrioTime (variable-cycle configuration Hz)"},
                         {"value": "fixauto", "label": "FixAuto (fixed packet timing)"},
                         {"value": "random", "label": "Random (use with Cycle Min Time)"}
                     ]
@@ -206,6 +207,16 @@
                     "default": "",
                     "min": 333,
                     "max": 10000
+                },
+                {
+                    "key": "prio-time",
+                    "type": "number",
+                    "cli_arg": "--prio-time",
+                    "label": "Prio Time (Hz)",
+                    "description": "Packet transmission cycle time in Hz (only for VarPrioTime), (default: 300Hz)",
+                    "default": "",
+                    "min": 10,
+                    "max": 5000
                 },
                 {
                     "key": "cycle-min-time",

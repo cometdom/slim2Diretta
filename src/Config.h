@@ -26,7 +26,8 @@ struct Config {
     unsigned int cycleTime = 10000;     // microseconds between packets
     bool cycleTimeAuto = true;          // compute from MTU + format
     unsigned int mtu = 0;               // 0 = auto-detect
-    std::string transferMode;           // "auto","varmax","varauto","fixauto","random" (empty=auto)
+    std::string transferMode;           // "auto","varmax","varauto","varpriotime","fixauto","random" (empty=auto)
+    unsigned int varPrioTime = 300;     // VarPrioTime cycle time in Hz (default: 300)
     unsigned int infoCycle = 100000;    // Info packet cycle µs (default 100ms)
     unsigned int cycleMinTime = 0;      // Min cycle for RANDOM mode (0 = unused)
     unsigned int targetProfileLimitTime = 0;   // 0=SelfProfile (stable), >0=TargetProfile(µs)

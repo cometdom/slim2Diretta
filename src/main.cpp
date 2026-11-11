@@ -44,7 +44,7 @@
 #include <sched.h>
 #include <cerrno>
 
-#define SLIM2DIRETTA_VERSION "1.4.31"
+#define SLIM2DIRETTA_VERSION "1.4.32"
 
 // Read /sys/devices/system/cpu/online and return the set of online CPU IDs.
 // Handles both ranges ("0-7") and lists ("0,2,4,6,8,10,12,14").
@@ -561,11 +561,14 @@ Config parseArguments(int argc, char* argv[]) {
         else if (arg == "--transfer-mode" && i + 1 < argc) {
             config.transferMode = argv[++i];
             if (config.transferMode != "auto" && config.transferMode != "varmax" &&
-                config.transferMode != "varauto" && config.transferMode != "fixauto" &&
-                config.transferMode != "random") {
-                std::cerr << "Invalid transfer-mode. Use: auto, varmax, varauto, fixauto, random" << std::endl;
+                config.transferMode != "varauto" && config.transferMode != "varpriotime" &&
+                config.transferMode != "fixauto" && config.transferMode != "random") {
+                std::cerr << "Invalid transfer-mode. Use: auto, varmax, varauto, varpriotime, fixauto, random" << std::endl;
                 exit(1);
             }
+        }
+        else if (arg == "--prio-time" && i + 1 < argc) {
+            config.varPrioTime = static_cast<unsigned int>(std::atoi(argv[++i]));
         }
         else if (arg == "--info-cycle" && i + 1 < argc) {
             config.infoCycle = static_cast<unsigned int>(std::atoi(argv[++i]));
@@ -708,7 +711,8 @@ Config parseArguments(int argc, char* argv[]) {
                       << "Diretta:\n"
                       << "  -t, --target <index>   Diretta target index (1, 2, 3...)\n"
                       << "  -l, --list-targets     List available targets and exit\n"
-                      << "  --transfer-mode <mode>     Transfer mode: auto, varmax, varauto, fixauto, random\n"
+                      << "  --transfer-mode <mode>     Transfer mode: auto, varmax, varauto, varpriotime, fixauto, random\n"
+                      << "  --prio-time <Hz>           Cycle time in Hz (varpriotime mode only, default: 300)\n"
                       << "  --info-cycle <us>          Info packet cycle time in us (default: 100000)\n"
                       << "  --cycle-time <us>          Transfer packet cycle max time in us (default: 10000)\n"
                       << "  --cycle-min-time <us>      Min cycle time in us (random mode only)\n"
@@ -987,6 +991,7 @@ int main(int argc, char* argv[]) {
     direttaConfig.cycleTimeAuto = config.cycleTimeAuto;
     if (config.mtu > 0) direttaConfig.mtu = config.mtu;
     direttaConfig.infoCycle = config.infoCycle;
+    direttaConfig.varPrioTime = config.varPrioTime;
     direttaConfig.cycleMinTime = config.cycleMinTime;
     direttaConfig.targetProfileLimitTime = config.targetProfileLimitTime;
     direttaConfig.cpuAudio = config.cpuAudio;
@@ -1001,6 +1006,8 @@ int main(int argc, char* argv[]) {
             direttaConfig.transferMode = DirettaTransferMode::VAR_MAX;
         else if (config.transferMode == "varauto")
             direttaConfig.transferMode = DirettaTransferMode::VAR_AUTO;
+        else if (config.transferMode == "varpriotime")
+            direttaConfig.transferMode = DirettaTransferMode::VAR_PRIO_TIME;
         else if (config.transferMode == "fixauto")
             direttaConfig.transferMode = DirettaTransferMode::FIX_AUTO;
         else if (config.transferMode == "random")
