@@ -2,6 +2,16 @@
 
 All notable changes to slim2diretta are documented in this file.
 
+## v1.4.33 (2026-11-15)
+
+### Added
+
+- **Diretta Host SDK 158 compatibility check.** Every `Host/*.hpp` is identical to 157 except `Connection.hpp` (a second trailing defaulted parameter on `Connection::open()`, source-compatible and never called directly by this codebase) and `Release.hpp` (version number only) — no `DirettaSync` source changes needed.
+
+### Changed
+
+- **`CMakeLists.txt`'s SDK auto-detection no longer needs a `DirettaHostSDK_<version>` path list hand-maintained on every SDK release.** The previous hardcoded list (6 candidate paths per supported version) missed SDK 150 once already (see the "SDK 150 not found by auto-detection" fix below) and needed another 6-line block added for 158. Replaced with a generic glob across the same 6 base locations (`$HOME`, project dir, its parent, `/opt`, `$HOME/audio`, `/usr/local`): every `DirettaHostSDK_*` directory found is compared by its trailing version number, highest wins — the same approach DirettaRendererUPnP's Makefile already uses (`find ... | sort -V | tail -1`). A future SDK release needs no `CMakeLists.txt` change at all.
+
 ## v1.4.32 (2026-11-11)
 
 ### Added

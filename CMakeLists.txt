@@ -16,7 +16,7 @@ if(DEFINED ENV{LLVM} OR LLVM)
     set(USE_LLD    ON CACHE BOOL "Use lld linker with clang"     FORCE)
 endif()
 
-project(slim2diretta VERSION 1.4.32)
+project(slim2diretta VERSION 1.4.33)
 
 set(CMAKE_CXX_STANDARD 17)
 
@@ -167,54 +167,35 @@ if(DEFINED ENV{DIRETTA_SDK_PATH})
     set(SDK_PATH $ENV{DIRETTA_SDK_PATH})
     message(STATUS "Using SDK from environment: ${SDK_PATH}")
 else()
-    # Search in common locations (newest first: 157, 155, 150, 149, 148, 147). Each
-    # version is tried in full before falling back to the next, so anyone
-    # who hasn't updated their SDK yet keeps building against whichever
-    # version they actually have installed - no action needed on their part.
-    set(SDK_SEARCH_PATHS
-        "$ENV{HOME}/DirettaHostSDK_157"
-        "${CMAKE_SOURCE_DIR}/DirettaHostSDK_157"
-        "${CMAKE_SOURCE_DIR}/../DirettaHostSDK_157"
-        "/opt/DirettaHostSDK_157"
-        "$ENV{HOME}/audio/DirettaHostSDK_157"
-        "/usr/local/DirettaHostSDK_157"
-        "$ENV{HOME}/DirettaHostSDK_155"
-        "${CMAKE_SOURCE_DIR}/DirettaHostSDK_155"
-        "${CMAKE_SOURCE_DIR}/../DirettaHostSDK_155"
-        "/opt/DirettaHostSDK_155"
-        "$ENV{HOME}/audio/DirettaHostSDK_155"
-        "/usr/local/DirettaHostSDK_155"
-        "$ENV{HOME}/DirettaHostSDK_150"
-        "${CMAKE_SOURCE_DIR}/DirettaHostSDK_150"
-        "${CMAKE_SOURCE_DIR}/../DirettaHostSDK_150"
-        "/opt/DirettaHostSDK_150"
-        "$ENV{HOME}/audio/DirettaHostSDK_150"
-        "/usr/local/DirettaHostSDK_150"
-        "$ENV{HOME}/DirettaHostSDK_149"
-        "${CMAKE_SOURCE_DIR}/DirettaHostSDK_149"
-        "${CMAKE_SOURCE_DIR}/../DirettaHostSDK_149"
-        "/opt/DirettaHostSDK_149"
-        "$ENV{HOME}/audio/DirettaHostSDK_149"
-        "/usr/local/DirettaHostSDK_149"
-        "$ENV{HOME}/DirettaHostSDK_148"
-        "${CMAKE_SOURCE_DIR}/DirettaHostSDK_148"
-        "${CMAKE_SOURCE_DIR}/../DirettaHostSDK_148"
-        "/opt/DirettaHostSDK_148"
-        "$ENV{HOME}/audio/DirettaHostSDK_148"
-        "/usr/local/DirettaHostSDK_148"
-        "$ENV{HOME}/DirettaHostSDK_147"
-        "${CMAKE_SOURCE_DIR}/DirettaHostSDK_147"
-        "${CMAKE_SOURCE_DIR}/../DirettaHostSDK_147"
-        "/opt/DirettaHostSDK_147"
-        "$ENV{HOME}/audio/DirettaHostSDK_147"
-        "/usr/local/DirettaHostSDK_147"
+    # Glob every DirettaHostSDK_* directory across the common install locations
+    # and pick the one with the highest trailing version number - mirrors
+    # DirettaRendererUPnP's Makefile (`find ... | sort -V | tail -1`). No
+    # per-version path list to maintain: a brand-new SDK release is picked up
+    # automatically the day it's extracted into one of these locations, and
+    # anyone who hasn't updated yet keeps building against whichever version
+    # they actually have installed.
+    set(SDK_SEARCH_BASES
+        "$ENV{HOME}"
+        "${CMAKE_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/.."
+        "/opt"
+        "$ENV{HOME}/audio"
+        "/usr/local"
     )
 
-    foreach(path ${SDK_SEARCH_PATHS})
-        if(EXISTS "${path}")
-            set(SDK_PATH "${path}")
-            break()
-        endif()
+    set(SDK_BEST_VERSION -1)
+    foreach(base ${SDK_SEARCH_BASES})
+        file(GLOB _sdk_candidates LIST_DIRECTORIES true "${base}/DirettaHostSDK_*")
+        foreach(cand ${_sdk_candidates})
+            if(IS_DIRECTORY "${cand}")
+                get_filename_component(_cand_name "${cand}" NAME)
+                string(REGEX MATCH "^DirettaHostSDK_([0-9]+)$" _ "${_cand_name}")
+                if(CMAKE_MATCH_1 AND CMAKE_MATCH_1 GREATER SDK_BEST_VERSION)
+                    set(SDK_BEST_VERSION "${CMAKE_MATCH_1}")
+                    set(SDK_PATH "${cand}")
+                endif()
+            endif()
+        endforeach()
     endforeach()
 
     if(NOT DEFINED SDK_PATH)
