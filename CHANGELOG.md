@@ -2,6 +2,12 @@
 
 All notable changes to slim2diretta are documented in this file.
 
+## v1.4.34 (unreleased)
+
+### Fixed
+
+- **End of the previous track cut off on a gapless sample-rate change** (reported by masakik, Fedora 44 / N150 / SDK 158, with Qobuz and with files from a NAS). When the next track had a different format, slim2diretta emptied its decode cache into the ring and then reopened the Diretta output as soon as the new track's prebuffer was ready. A rate change closes the SDK (`stop()`/`close()`), which threw away everything still in the ring — up to the whole ring: 3 s below 176 kHz, 6 s at or above (more after rounding to a power of two), or whatever `--pcm-buffer-seconds` sets. That is why a larger buffer made it worse (192→44.1 kHz cut with the default 6 s but not with 3 s; 96→44.1 kHz cut with 10 s), and why a short cut could go unnoticed in a quiet or reverberant ending. The PCM chaining loop now holds the reopen until the previous track has played out of the ring, while it keeps reading and decoding the new track (so the HTTP stream keeps flowing and the stall detection stays quiet). The wait is bounded (buffered time + 1 s, extended during a pause) and stops on a seek or stop. The momentary dry ring before the reopen is expected, so that underrun event is not logged. The same fix applies to gapless DSD rate changes (e.g. DSD64→DSD128), which lost up to the DSD ring (0.8 s by default). Transitions between PCM and DSD already went through the normal end-of-track path and were not affected. Not yet verified on hardware.
+
 ## v1.4.33 (2026-11-15)
 
 ### Added
