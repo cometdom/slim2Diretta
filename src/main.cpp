@@ -44,7 +44,7 @@
 #include <sched.h>
 #include <cerrno>
 
-#define SLIM2DIRETTA_VERSION "1.4.33"
+#define SLIM2DIRETTA_VERSION "1.4.34"
 
 // Read /sys/devices/system/cpu/online and return the set of online CPU IDs.
 // Handles both ranges ("0-7") and lists ("0,2,4,6,8,10,12,14").
@@ -1282,6 +1282,10 @@ int main(int argc, char* argv[]) {
                         AudioFormat audioFmt{};
                         uint32_t detectedChannels = 2;
                         uint32_t dsdBitRate = 0;
+                        // Gapless DSD rate change: same play-out wait as the
+                        // PCM path (see waitOldTrackPlayout there)
+                        bool dsdPlayoutChecked = false;
+                        auto dsdPlayoutDeadline = std::chrono::steady_clock::now();
                         uint64_t byteRateTotal = 0;
 
 
@@ -1425,6 +1429,37 @@ int main(int argc, char* argv[]) {
                                     direttaOpened = true;
                                     slimproto->sendStat(StatEvent::STMl);
                                     continue;
+                                }
+
+                                // Format change: the reopen discards what the
+                                // previous track still has in the ring. Keep
+                                // reading the new track until it has played out.
+                                if (!dsdFirstTrack && direttaPtr->isOpen()) {
+                                    auto now = std::chrono::steady_clock::now();
+                                    double left = direttaPtr->getBufferedSeconds();
+                                    if (!dsdPlayoutChecked || direttaPtr->isPaused()) {
+                                        if (!dsdPlayoutChecked) {
+                                            LOG_INFO("[Gapless] Letting the previous DSD track play out ("
+                                                     << static_cast<int>(left * 1000)
+                                                     << "ms buffered) before reopening");
+                                        }
+                                        dsdPlayoutChecked = true;
+                                        dsdPlayoutDeadline = now + std::chrono::milliseconds(
+                                            static_cast<int>(left * 1000) + 1000);
+                                    }
+                                    if (left > 0.002 && now < dsdPlayoutDeadline) {
+                                        // The reader may be full and stop reading
+                                        // HTTP meanwhile: that is not a stall.
+                                        if (dsdReader->availableBytes() >= DSD_BUF_MAX) {
+                                            lastDataTime = now;
+                                        }
+                                        if (!gotData) {
+                                            std::this_thread::sleep_for(
+                                                std::chrono::milliseconds(2));
+                                        }
+                                        continue;
+                                    }
+                                    direttaPtr->consumeRtEvents();  // the dry ring is expected
                                 }
 
                                 size_t targetBytes = static_cast<size_t>(byteRateTotal * PREBUFFER_MS / 1000);
@@ -1705,6 +1740,15 @@ int main(int argc, char* argv[]) {
                     // this is still the same logical track, not a new chained one.
                     bool skipGaplessCompareOnRedetect = false;
 
+                    // Gapless format change: the reopen closes the SDK (rate
+                    // change) or clears the ring, discarding whatever the old
+                    // track still has buffered — up to the whole ring (6 s and
+                    // more at high rates, or a large --pcm-buffer-seconds).
+                    // PHASE 3 keeps reading and decoding the new track but holds
+                    // the reopen until the old track has played out.
+                    bool waitOldTrackPlayout = false;
+                    auto oldTrackPlayoutDeadline = std::chrono::steady_clock::now();
+
                     while (audioTestRunning.load(std::memory_order_acquire) &&
                            (!httpEof || cacheFrames() > 0)) {
 
@@ -1924,6 +1968,17 @@ int main(int argc, char* argv[]) {
                                         decodeCachePos += fw * detectedChannels;
                                     }
                                     direttaOpened = false;
+                                    if (direttaPtr->isOpen()) {
+                                        double left = direttaPtr->getBufferedSeconds();
+                                        waitOldTrackPlayout = true;
+                                        oldTrackPlayoutDeadline =
+                                            std::chrono::steady_clock::now() +
+                                            std::chrono::milliseconds(
+                                                static_cast<int>(left * 1000) + 1000);
+                                        LOG_INFO("[Gapless] Letting the previous track play out ("
+                                                 << static_cast<int>(left * 1000)
+                                                 << "ms buffered) before reopening");
+                                    }
                                 }
                             }
                             skipGaplessCompareOnRedetect = false;
@@ -1970,6 +2025,35 @@ int main(int argc, char* argv[]) {
                             auto fmt = decoder->getFormat();
                             size_t targetFrames = static_cast<size_t>(
                                 fmt.sampleRate) * prebufferMs / 1000;
+                            if (waitOldTrackPlayout) {
+                                // Stop ~10 ms before the ring runs dry: the
+                                // stopPlayback(false) below fades that last bit
+                                // out into silence, with no underrun. A pause
+                                // stops the clock, so the deadline moves with it.
+                                auto now = std::chrono::steady_clock::now();
+                                double left = direttaPtr->getBufferedSeconds();
+                                if (direttaPtr->isPaused()) {
+                                    oldTrackPlayoutDeadline = now + std::chrono::milliseconds(
+                                        static_cast<int>(left * 1000) + 1000);
+                                }
+                                if (left > 0.010 &&
+                                    now < oldTrackPlayoutDeadline) {
+                                    if (!gotData) {
+                                        std::this_thread::sleep_for(
+                                            std::chrono::milliseconds(2));
+                                    }
+                                    continue;  // keep reading the new track meanwhile
+                                }
+                                waitOldTrackPlayout = false;
+                                // Same clean stop as a user stop followed by a
+                                // track in another format: fade + silence, then
+                                // open() below reconfigures.
+                                if (direttaPtr->isPlaying()) {
+                                    direttaPtr->stopPlayback(false);
+                                }
+                                direttaPtr->consumeRtEvents();
+                                LOG_DEBUG("[Gapless] Previous track played out, reopening");
+                            }
                             if (cacheFrames() >= targetFrames || httpEof) {
                                 size_t prebufFrames = cacheFrames();
                                 if (prebufFrames == 0) continue;
@@ -2246,19 +2330,35 @@ int main(int argc, char* argv[]) {
                         if (!hasPendingTrack.load(std::memory_order_acquire) &&
                             audioTestRunning.load(std::memory_order_acquire)) {
                             LOG_DEBUG("[Gapless] PCM: waiting for next track...");
-                            auto waitStart = std::chrono::steady_clock::now();
-                            constexpr int GAPLESS_WAIT_MS = 2000;
+                            // Wait for the next track while the ring plays out.
+                            // The ring can hold many seconds (3 s, 6 s at high
+                            // rates, more with --pcm-buffer-seconds): stopping
+                            // after a fixed 2 s cut that much off the end of
+                            // the last track (masakik, v1.4.34). Stop only once
+                            // it is nearly empty; the deadline is a safety net,
+                            // pushed back while paused.
+                            constexpr double END_PLAYOUT_LEFT_SEC = 0.010;
+                            auto now = std::chrono::steady_clock::now();
+                            double left = direttaOpened ? direttaPtr->getBufferedSeconds() : 0.0;
+                            auto deadline = now + std::chrono::milliseconds(
+                                static_cast<int>(left * 1000) + 2000);
                             while (!hasPendingTrack.load(std::memory_order_acquire) &&
                                    audioTestRunning.load(std::memory_order_acquire) &&
-                                   std::chrono::duration_cast<std::chrono::milliseconds>(
-                                       std::chrono::steady_clock::now() - waitStart).count() < GAPLESS_WAIT_MS) {
-                                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                                   direttaOpened && direttaPtr->isOpen()) {
+                                now = std::chrono::steady_clock::now();
+                                left = direttaPtr->getBufferedSeconds();
+                                if (direttaPtr->isPaused()) {
+                                    deadline = now + std::chrono::milliseconds(
+                                        static_cast<int>(left * 1000) + 2000);
+                                }
+                                if (left <= END_PLAYOUT_LEFT_SEC || now >= deadline) break;
+                                std::this_thread::sleep_for(std::chrono::milliseconds(2));
                             }
 
                             // No next track arrived — stop playback gracefully
-                            // BEFORE the ring buffer drains and causes an underrun.
-                            // Roon interprets underruns as errors and won't start
-                            // the next track; a clean stop avoids this.
+                            // just BEFORE the ring buffer runs dry, so there is
+                            // no underrun: Roon interprets underruns as errors
+                            // and won't start the next track.
                             if (!hasPendingTrack.load(std::memory_order_acquire) &&
                                 audioTestRunning.load(std::memory_order_acquire)) {
                                 LOG_INFO("[Gapless] No next track — stopping playback cleanly");
